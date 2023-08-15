@@ -1,0 +1,2930 @@
+---
+title: "Capstone"
+author: "Anne Miller"
+date: "April 1, 2023"
+output:
+  flexdashboard::flex_dashboard:
+    horizontal_layout: fill
+    vertical_layout: fill
+runtime: shiny
+
+---
+
+
+
+```{r, setup, include=FALSE}
+
+#set working directory
+knitr::opts_knit$set(root.dir='/Users/annek/Downloads/Capstone')
+
+#load needed libraries
+library(flexdashboard)
+library(plotly)
+library(sf)
+library(tidyverse)
+library(stringr)
+library(dplyr)
+library(ggplot2)
+library(shiny)
+library(urbnmapr)
+library(shinydashboard)
+library(formattable)
+library(scales)
+library(usmap)
+library(rgl)
+library(gt)
+library(car)
+library(vegan)
+library(DescTools)
+library(kableExtra)
+library(scatterplot3d)
+library(corrplot)
+library(coin)
+library(MASS)
+library(PredPsych)
+
+#load data
+data <- read.csv(file = "Parks6.csv",header=T)
+#remove unneeded columns
+data <- data[,-c(2:4,33,36,43,47)]
+
+```
+
+
+```{r format-data}
+
+#===================FORMAT DATA TYPES=====================================
+#=========================================================================
+
+#format factors
+data[,2:28] <- lapply(data[,2:28],as.factor)
+
+#===================FORMAT HEALTH OUTCOME VARIABLES=======================
+#=========================================================================
+#first, create a copy of the health variables that need to be standardized
+data.standardized <- data.frame(data[,c(1,29:41)])
+#scale the health variables
+data.standardized[,2:14] <- data.frame(scale(data.standardized[,2:14]))
+#make another copy of the data for the positive health outcome variables
+data.temp <- data.standardized
+#multiply these positive variables by -1
+#to put them on the same scale as the negative variables
+data.temp$PCPAdult <- data.temp$PCPAdult*-1
+data.temp$PhysicalLeisure <- data.temp$PhysicalLeisure*-1
+#create the overall health rating by subtracting all row sums from 1
+data.temp$HealthRating <- -1*(rowSums(data.temp[,2:14]))
+
+#add overall health rating back into the standardized dataset
+data.standardized <- cbind(data.standardized,HealthRating=data.temp$HealthRating)
+#add overall health rating into the full data frame
+data <- cbind(data,HealthRating=data.temp$HealthRating)
+
+#===================COMBINE PREDICTOR VARIABLES===========================
+#=========================================================================
+
+#there are 62 observations and 27 predictors, which is too large a ratio
+#remove some predictors by grouping them together
+data <- data%>%
+  #combine all amenity variables related to water sports by adding a 1
+  #to a new column called "watersports" when an observation has a 1 in
+  #any of the water sport-related columns
+  mutate(watersports=ifelse(Boat.Launch==1|Boat.Rentals==1|
+                              Canoe.Kayak==1|Stand.up.Paddle.Boarding==1|
+                              Surfing.Windsurfing==1|Swimming.Beach==1|Swimming.Pool==1,1,0))%>%
+  #combine all food amenities with the same method
+  mutate(food.amenities=ifelse(Food==1|Grills==1,1,0))%>%
+  #combine trail amenities
+  mutate(trails=ifelse(Biking==1|Equestrian.Trails==1|Hiking==1,1,0))%>%
+  #combine field sports
+  mutate(field.sports=ifelse(Disc.Golf==1|Playing.Fields==1,1,0))%>%
+  #combine snow sports
+  mutate(snow.sports=ifelse(Sledding==1|Snowmobiling==1|Snowshoeing.X.Country.Skiing==1,1,0))%>%
+  #combine hunting and fishing
+  mutate(hunting.fishing=ifelse(Hunting==1|Fishing==1,1,0))%>%
+  #combine info centers
+  mutate(info.center=ifelse(Visitor.Center==1|Nature.Center==1,1,0))
+
+#remove redundant columns (the original columns that are now combined)
+data <- data[,-c(3:5,7:15,18,20:27)]
+
+#make new variables factors
+data[,22:28] <- lapply(data[,22:28],as.factor)
+#group binary variables together again
+data <- data[, c(1:7,22:28,8:21)]
+
+```
+
+
+Introduction {data-orientation=rows}
+====================
+
+<div align="center"> <h1 align="center"> **Relationships Between Health Outcomes and State Park Amenities in Counties in New York State: 2020-2021 Data** </h3> </div>
+
+<br />
+
+<div align="center"> <h2 align="center"> By Anne Miller </h2> </div>
+
+<br />
+<br />
+<br />
+
+<div align="center"> <h2 align="center"> **Question 1:**	Do mean health outcomes change based on the state park amenities available and, if so, what is the magnitude and direction of the relationship(s)? 
+<br />
+<br />
+**Question 2:**	Does that relationship vary between groups of counties with different ranges of health outcomes and, if so, what is the magnitude and direction of the relationship(s) within each group?  </h2> </div>
+
+
+
+Outcomes {data-orientation=rows data-navmenu='Data Used'}
+====================
+
+<div align="center"> <h2 align="center"> Health Outcome Variables Used in the Analysis </h2> </div>
+
+<div align="center"> <h3 align="center"> As reported by www.data.ny.gov for the years 2020 or 2021 </h3> </div>
+
+Row 1
+-------------
+
+
+```{r show-data}
+
+#===================DISPLAY DETAILED DESCRIPTIONS OF OUTCOMES=============
+#=========================================================================
+
+#we are going to display the variables in an easy-to-read way,
+#so we need a dataframe with more descriptive names
+
+#create new dataframe of detailed descriptions of all health outcomes
+outcome.data <- as.data.frame(cbind(c('Binge Drink','Buprenorphine','Cardiovascular',
+                                      'Cardiovascular Hospital',
+                                      'Cigarette','Depression','Adult Diabetes','Adult Obesity',
+                                      'Child Obesity','Opiod Overdose','Regular Healthcare',
+                                      'Adult Physical Leisure','Suicide'),
+            c('Age-adjusted percentage of adults who report binge drinking within the last month',
+            'Age-adjusted percentage of individuals who received one or more buprenorphine prescription for opioid use disorder',
+              'Percentage of adults diagnosed with cardiovascular disease',
+              'Age-adjusted percentage of cardiovascular disease hospitalizations','Percentage of adults who smoke cigarettes',
+             'Percentage of adults diagnosed with depression',
+                  'Age-adjusted percentage of adults diagnosed with diabetes','Percentage of obese adults (ages 18-64)',
+                  'Percentage of obese children and adolescents (ages 0-17)','Age-adjusted percentage of opiod overdose deaths',
+                  'Age-adjusted percentage of adults who have a regular healthcare provider',
+                  'Percentage of adults (ages 18-64) who participate in leisure physical activity',
+                  'Age-adjusted percentage of suicide mortalities'),
+                  c('Prevention Agenda 2019-2024 Tracking Indicators',
+                  'Prevention Agenda 2019-2024 Tracking Indicators',
+                  'Community Health Indicator Reports (CHIRS)',
+                  'Community Health Indicator Reports (CHIRS)',
+                  'Prevention Agenda 2019-2024 Tracking Indicators',
+                  'Behavioral Risk Factor Surveillance System (BRFSS)',
+                  'Community Health Indicator Reports (CHIRS)',
+                  rep('Prevention Agenda 2019-2024 Tracking Indicators',6))))
+
+#remove colnames
+colnames(outcome.data) <- NULL
+#display as kable
+outcome.data%>%kable%>%row_spec(c(1,3,5,7,9,11,13),background="#EDF6FF")%>%
+  column_spec(1,bold=T)%>%
+  kable_styling(latex_options = "striped")%>%
+  add_header_above(c('Variable Name'=1,'Description'=1,'Source'=1),
+                   font_size = 22,align='l')
+
+
+```
+
+
+Predictors {data-orientation=rows data-navmenu='Data Used'}
+====================
+
+<div align="center"> <h2 align="center"> Park Amenity Variables Used in the Analysis </h2> </div>
+
+<div align="center"> <h3 align="center"> As reported by www.parks.ny.gov for the years 2020 or 2021 </h3> </div>
+
+Row 1
+-------------
+
+
+```{r amenity-vars-explained}
+
+#===================DISPLAY DETAILED DESCRIPTIONS OF AMENITIES============
+#=========================================================================
+
+#let's do the same with the amenity variables
+#create dataframe of amenity variables' description
+amenity.data <- as.data.frame(cbind(c('Pets','Camping','Pavillions','Playgrounds','Showers',
+                                      'Waterfalls','Watersports','Food Amenities','Trails',
+                                      'Field Sports','Snow Sports','Hunting/Fishing',
+                                      'Information Centers'),
+            c('No pets allowed',
+              'No camping allowed in the park',
+            'Park does not have pavillions',
+                  'Park does not have any playgrounds',
+                  'Park does have not showers',
+                  'No waterfalls in the park',
+                  'No watersports in the park',
+            'Park has no food amenities',
+            'Park does not have trails',
+            'Park does not have field sports',
+            'Park does not have snow sports',
+            'No hunting or fishing allowed at the park',
+            'No information centers at the park'),
+            c(
+            'Pets are allowed in the park',
+              'Camping is allowed in the park',
+             'Park has pavillions','Park has at least one playground','Park has showers',
+                  'At least one waterfall in the park',
+            'Park has at least one of the following: boat launch, boat rental, canoeing/kayaking, 
+            
+            \n stand-up paddle boarding, surfing/windsurfing, swimming beach, swimming pool',
+            'Park has at least one of the following: food available for purchase, grills',
+            'Park has at least one of the following: biking trail(s), equestrian trail(s), hiking trail(s)',
+            'Park has disc golf and/or playing fields',
+            'Park has at least one of the following: sledding, snowmobiling, snowshoeing/cross-country skiing',
+            'Park alows hunting and/or fishing',
+            'Park has visitor center(s) and/or nature center(s)')))
+
+#remove colnames
+colnames(amenity.data) <- NULL
+
+#display as kable
+amenity.data%>%kable%>%row_spec(c(1,3,5,7,9,11,13),background="#EDF6FF")%>%
+  column_spec(1,bold=T)%>%
+  kable_styling(latex_options = "striped")%>%
+  add_header_above(c('Variable Name'=1,'0'=1,'1'=1),font_size = 22,align='l')
+
+
+```
+
+
+Health Outcomes by County {data-orientation=rows}
+======================
+
+<div align="center"> <h2 align="center"> Health Outcomes in New York (as reported by www.health.ny.gov for the years 2020 and 2021) </h2> </div>
+
+-----------
+
+
+```{r county-outcomes-plot-setup}
+
+#===================PREPARE MAP DATA FOR VISUALIZATIONS===================
+#=========================================================================
+
+#we are going to show the health outcomes on maps of
+#New York with each county represented, so we need to
+#create a dataframe with the county geographic info, 
+#amenity info, and health outcome info
+
+#create df with county names and health outcomes
+county.df <- data[,c(1,15:28)]
+#change colname of "county" column to match that of the map data
+#so the df can be joined with the geographic dataset
+colnames(county.df)[1] <- 'county_name'
+
+#create variable with county shape files
+counties <- get_urbn_map("counties", sf = TRUE)
+
+#filter the data to get just New York data
+counties <- counties %>% 
+  filter(state_abbv == "NY")
+
+#transform the data so it is useable in the maps
+counties <- counties %>% 
+  st_transform("EPSG:32116")
+
+#remove the "county" part of the county names so the county
+#names match in both datasets
+counties1 <- counties %>% 
+  separate(county_name, c("county_name", "county"), sep = " County")
+
+#order both dataframes alphabetically by county
+counties1 <- counties1 %>% arrange(county_name)
+county.df <- county.df %>% arrange(county_name)
+
+#combine dataframes
+county.df1 <- counties1 %>%
+  left_join(
+    county.df,
+    by = 'county_name'
+  )
+
+```
+
+Row 1 {data-height=100}
+------------------
+
+###
+
+```{r county-outcomes-plot-input}
+
+#get user input to select a health outcome to visualize
+radioButtons(
+  inputId='outcome',
+  label='Select a Health Outcome:',
+  choices = colnames(county.df)[-1],
+  inline=T
+  )
+
+```
+
+Row 2
+---------------
+
+### {data-width=200}
+
+<br />
+<br />
+<br />
+<br />
+<br />
+<br /> 
+  
+  
+Key:
+
++ Children are individuals aged 0-17
++ Adults are individuals aged 18-64
++ Buprenorphine is an FDA approved medication used in the treatment of opioid use disorder.
++ `Health Rating` is an overall health outcome score based on standardized values for all health outcomes for a county. It represents how a county's overall health outcomes compare to the mean health outcomes statewide. 
+
+###
+
+```{r county-outcomes-plot}
+
+#===================PLOT THE OUTCOME THE USER HAS CHOSEN==================
+#=========================================================================
+
+#create the plot
+renderPlotly({
+  #create subset of data with user choice
+  sub <- county.df%>%dplyr::select(county_name,input$outcome)
+  #create title based on user choice
+  title <- ifelse(input$outcome=='BingeDrink',
+           'Age-Adjusted Percentage of Adults That Report Binge Drinking within the Past Month by County',
+                  ifelse(input$outcome=='Buprenorphine',
+                         'Age-Adjusted Percentage of Adults that Received a Buprenorphine Prescription for Opiod Use Disorder by County',
+                  ifelse(input$outcome=='Cardiovascular',
+          'Age-Adjusted Percentage of Adults Diagnosed with Cardiovascular Disease by County',ifelse(input$outcome=='CardioHospital',
+                  'Age-Adusted Percentage of Hospitalizations Due to Cardiovascular Disease by County',
+                  ifelse(input$outcome=='Cigarette','Percentage of Adults Who Smoke Cigarettes by County',ifelse(input$outcome=='Depression',
+                  'Percentage of Adults Diagnosed with Depression by County',
+                  ifelse(input$outcome=='DiabetesAdult',
+                  'Age-Adjusted Percentage of Adults Diagnosed with Diabetes by County',
+                  ifelse(input$outcome=='ObeseAdult','Percentage of Obese Adults by County',
+                  ifelse(input$outcome=='ObeseChild',
+                  'Percentage of Obese Children and Adolescents by County',
+                  ifelse(input$outcome=='OpiodOverdose','Age-Adjusted Percentage of Opiod Overdose Deaths by County',
+                  ifelse(input$outcome=='PCPAdult','Age-Adjusted Percentage of Adults Who Have a Regular Healthcare Provider by County',
+                         ifelse(input$outcome=='PhysicalLeisure','Percentage of Adults Who Participate in Physical Leisure by County',
+                                ifelse(input$outcome=='Suicide',
+                                       'Age-Adjusted Percentage of Suicide Mortality by County',
+                                       'Overall Health Rating by County')))))))))))))
+  #create the plot
+         outcome.plot <- ggplot() +
+           geom_sf(data = county.df1,
+                   mapping = aes(fill = sub[,2]))+
+           theme_minimal()+
+           scale_fill_gradient2(
+             #set the color gradient based on the health outcomes
+             low = ifelse(input$outcome=='PCPAdult'|input$outcome=='PhysicalLeisure'|
+                            input$outcome=='HealthRating','tomato','green4'),
+             mid='yellow',
+             high = ifelse(input$outcome=='PCPAdult'|input$outcome=='PhysicalLeisure'|
+                             input$outcome=='HealthRating','green4','tomato'),
+             midpoint=mean(sub[,2]))+
+           #add titles
+           labs(title = paste(title),
+                fill=ifelse(input$outcome=='HealthRating','Rating','Percentage'))+
+           #adjust title positions
+           theme(legend.title.align = 0.5,
+                 plot.title = element_text(hjust = 0.5),
+                 #remove unneeded axes text
+           axis.text.x = element_blank(),axis.text.y = element_blank(),rect = element_blank(),
+           panel.grid.major = element_line(color = 'white'))
+
+
+  #plot the map
+  ggplotly(outcome.plot)
+  
+})
+
+```
+
+
+
+Amenities {data-orientation=rows}
+======================
+  
+<div align="center"> <h2 align="center"> Park Amenities by County (as reported by www.parks.ny.gov in 2020 or 2021) </h2> </div>
+  
+----------
+  
+  
+Row 1 {data-height=100}
+------------------
+  
+###
+  
+```{r amenity-county-plot-input}
+
+#get user input for amenities to visualize
+radioButtons(
+  inputId='amenity',
+  label='Select an Amenity:',
+  choices = colnames(data)[2:14],
+  inline = T
+)
+
+#create dataframe of county data and amenities
+county.amenity.df <- cbind(county.df,data[,2:14])
+
+```
+
+Row 2
+---------------
+  
+###
+  
+```{r amenity-county-plot}
+
+#===================PLOT THE AMENITY THE USER HAS CHOOSEN=================
+#=========================================================================
+
+#amenity by county plot
+renderPlotly({
+  #create titles
+  title.amenity.plot <- ifelse(input$amenity=='Pets',
+                             'Counties with Parks that Allow Pets',
+                             ifelse(input$amenity=='Camping',
+                              'Counties with Parks that Allow Camping',
+                             ifelse(input$amenity=='Pavillions',
+                              'Counties with Parks that have Pavillions',
+                             ifelse(input$amenity=='Playground',
+                              'Counties with Parks that have Playgrounds',
+                             ifelse(input$amenity=='Showers',
+                              'Counties with Parks that have Showers',
+                             ifelse(input$amenity=='Waterfalls',
+                              'Counties with Parks that have Waterfalls',
+                             ifelse(input$amenity=='watersports',
+                              'Counties with Parks that have Watersports',
+                             ifelse(input$amenity=='food.amenities',
+                              'Counties with Parks that have Food and/or Grills',
+                             ifelse(input$amenity=='trails',
+                              'Counties with Parks that have Trails',
+                             ifelse(input$amenity=='field.sports',
+                              'Counties with Parks that have Field Sports',
+                             ifelse(input$amenity=='snow.sports',
+                              'Counties with Parks that have Snow Sports',
+                             ifelse(input$amenity=='hunting.fishing',
+                              'Counties with Parks that Allow Hunting and/or Fishing',
+                              'Counties with Parks that have Information and/or Nature Centers'))))))))))))
+  #create subset of data with user choice
+  sub <- county.amenity.df%>%dplyr::select(county_name,input$amenity)
+  #create plot
+  amenity.plot <- sub%>%
+    ggplot() +
+    geom_sf(data = county.df1,
+            mapping = aes(fill = sub[,2]))+
+    theme_minimal()+
+    #create the color scheme based on whether a county has the amenity or not
+    scale_fill_manual(labels=c('No','Yes'),values=c('#2874A6','#61BEFC'))+
+    #add labels
+    labs(title = paste(title.amenity.plot),fill=colnames(sub)[2])+
+    theme(legend.title.align = 0.5,
+          #adjust title position
+          plot.title = element_text(hjust = 0.5),
+          #remove unneeded axis text
+           axis.text.x = element_blank(),axis.text.y = element_blank(),
+           panel.grid.major = element_line(color = 'white'))
+  
+  #display plot
+  ggplotly(amenity.plot)
+})
+
+```
+
+
+
+
+
+Health Outcomes vs. Amenities {data-orientation=cols}
+======================
+  
+<div align="center"> <h2 align="center"> Differences in Overall Health Rating for 2020 and 2021 Based on Park Amenities Available in 2020 and 2021 </h2> </div>
+  
+-----------
+
+The boxplots show the spread of the overall health rating within counties that do not have the amenity and counties that do. The lighter boxes represent the average overall health ratings in counties with the amenity, and the darker boxes represent the average overall health ratings in counties without it. A visible difference in median could imply an association between overall health rating and the park amenity shown. For example, the median health rating in counties with the following amenities appears slightly higher than the median health rating in counties without them: pets allowed, playgrounds, waterfalls, trails, and hunting and/or fishing. 
+
+  
+```{r, outcomes-v-amenities-plot, fig.show="hold", fig.dim=c(3.6,4.8)}
+
+#create function to create boxplots of the overall health rating ~ each amenity
+amenity.var.funct <- function(a.col){
+  #create plot
+  p <- ggplot(data,(aes(HealthRating,fill=data[,a.col])))+geom_boxplot()+
+    theme_minimal()+
+    #create color scheme based on whether the observation has the amenity
+    scale_fill_manual(values=c('#2874A6','#61BEFC'),name='Amenity Availability',
+                      labels=c('No','Yes'))+
+    #add titles
+    ggtitle(colnames(data)[a.col])+coord_flip()+
+    theme(plot.title = element_text(hjust = 0.5))
+  #display plot
+  print(p)
+}
+
+#iterate over all amenity columns
+for(a.col in 2:13){
+  #apply the boxplot function to each column
+  amenity.var.funct(a.col)
+}
+
+```
+
+
+
+
+Question 1 Defined {data-navmenu='Question 1'}
+===========
+  
+  
+<div align="center"> <h2 align="center"> **Question 1:	Do mean health outcomes change based on the state park amenities available and, if so, what is the magnitude and direction of the relationship(s)?** </h2> </div>
+  
+###
+  
+<div align="center"> <h3 align="center"> 
+  
+<br />
+<br />
+  
+  
+**Step 1: Check MANOVA/ANOVA assumptions**\   
+<br />
+- Multivariate Normality\
+- Homogeneity of Variance\
+- Independence\
+- No multicollinearity\
+- No outliers\   
+<br />
+*Variables remaining: Cardiovascular, Cigarette, Square Root-Transformed Depression, Log-Transformed Adult Obesity, Physical Leisure*
+<br />
+<br />
+  **Step 2: Conduct MANOVA**\   
+<br />
+  - Post-hoc LDA\   
+<br />
+*MANOVA showed statistically significant evidence of an association between the above variables and playgrounds (p-value=0.04).*
+<br />
+<br />
+  **Step 3: Conduct ANOVA**\   
+<br />
+  - Post-hoc Tukey-Kramer\
+<br />
+*ANOVA showed statistically significant evidence of an association between overall health rating and camping (p-value=0.03) and trails (p-value=0.01). \ Tukey-Kramer showed statistically significant evidence of an association between overall health rating and trails only (p-value=0.01).*
+
+</h3> </div>
+
+
+
+```{r normality-check-setup}
+
+#===================CHECK 1st MANOVA ASSUMPTION: NORMAL DISTRIBUTION======
+#=========================================================================
+
+#We need to run a Shapiro test for all combinations of health outcomes and amenities
+#to test normality within each subset. Some of the raw variables will not be normally
+#distributed, so we'll want to try some transformations and check those for normality.
+#To do this, we'll need a function that tests for normally based on a given transformation.
+
+#===================CREATE NORMALITY TEST FUNCTION========================
+#=========================================================================
+
+#create function to do this that takes as input the transformation we want done
+shapiro.funct <- function(transform){
+  #create empty vectors to hold the combination tested and its results
+  h.vars <- a.vars <- p.values0 <- p.values1 <- c()
+  #iterate over all health outcomes
+  for(h.col in 15:27){
+    #log transform outcomes if the user requests it
+    if(transform=='log'){
+      data[,h.col] <- log(data[,h.col])
+    #square root transform outcomes if the user requests it
+    } else if (transform=='sqrt'){
+      data[,h.col] <- sqrt(data[,h.col])
+    #cube root transform outcomes if the user requests it
+    } else if (transform=='cube'){
+      data[,h.col] <- (data[,h.col])^1/3
+    }
+    #iterate over all amenities
+    for(a.col in 2:14){
+      #conduct shapiro-wilk test for the health outcome represented by h.col
+      #in counties where the amenity represented by a.col is not present
+      
+      #note we need to use the try() function and silent warnings because some counties
+      #may not have enough observations within each group to conduct the test
+      
+      test0 <- try(shapiro.test((data[,h.col][data[,a.col]==0])),silent=T)
+      #conduct the test on the health outcome in counties where the amenity is present
+      test1 <- try(shapiro.test((data[,h.col][data[,a.col]==1])),silent=T)
+      #if we get an error because there are not enough observations without the amenity
+      if(class(test0)=='try-error'){
+        #substitute NA for the p-value we should have received if the test had worked
+        p.values0 <- append(p.values0,NA)
+        #if not, add the resulting p-value from the test to the p-values vector
+      } else {p.values0 <- append(p.values0,round(test0$p.value,4))}
+      #do the same for the p-values of the observations with the amenity
+      if(class(test1)=='try-error'){
+        p.values1 <- append(p.values1,NA)
+      } else {p.values1 <- append(p.values1,round(test1$p.value,4))}
+      #add the name of the health outcome and amenity the p-values correspond to
+      #to the h.vars and a.vars vectors
+      h.vars <- append(h.vars,colnames(data[h.col]))
+      a.vars <- append(a.vars,colnames(data[a.col]))
+    }
+  }
+  #combine the resulting p-values, health variable names, and amentity variable names into a data frame
+  results <- data.frame(cbind(Outcome=h.vars,Amenity=a.vars,Pvalue0=p.values0,Pvalue1=p.values1))
+}
+
+
+#===================RUN THE FUNCTION FOR EACH TRANSFORMATION==============
+#=========================================================================
+
+#create dataframe with the results of the above function for raw data
+transformed.results <- shapiro.funct('none')
+#add a column specifying what transformation was done. In this case, it's none.
+transformed.results$transformation <- 'None'
+
+#create dataframe with the results of the above function for log transformed data
+log.results <- shapiro.funct('log')
+#add a column specifying what transformation was done
+log.results$transformation <- 'Log'
+
+#create dataframe with the results of the above function for square root transformed data
+sqrt.results <- shapiro.funct('sqrt')
+#add a column specifying what transformation was done
+sqrt.results$transformation <- 'Square Root'
+
+#create dataframe with the results of the above function for cube root transformed data
+cube.results <- shapiro.funct('cube')
+#add a column specifying what transformation was done
+cube.results$transformation <- 'Cube Root'
+
+#===================COMBINE THE TRANSFORMED DATASETS======================
+#=========================================================================
+
+#combine the datasets into a dataframe of all shapiro-wilk test resutls
+results.full <- rbind(transformed.results,log.results,sqrt.results,cube.results)
+
+#change colnames
+colnames(results.full) <- c('Outcome','Amenity','Pvalue0','Pvalue1','Transformation')
+#convert pvalues for each group to numeric
+results.full$Pvalue0 <- as.numeric(results.full$Pvalue0)
+results.full$Pvalue1 <- as.numeric(results.full$Pvalue1)
+#remove row names
+row.names(results.full)=NULL
+
+```
+
+
+```{r normality-check-formatter}
+
+#create formatter to change the color of the shapiro-wilk results
+#based on whether the p-value is <0.05 at EITHER level of the amenity
+#(p-values<0.05 indicate evidence of nonnormality, which is a problem for MANOVA)
+
+#create the p-value formatter
+pvalue.format=formatter("span", 
+                        #specify font size
+                        style = ~ style(font.size = "20px",
+                              #specify color as red if the p-value at either level is <0.05 and black otherwise
+                                        color = ifelse(Pvalue1 < 0.05|Pvalue0<0.05,"red", "black")))
+
+
+```
+
+
+MANOVA Assumptions Part 1 {data-orientation=rows data-navmenu='Question 1'}
+====================
+  
+Row 1 {data-height=100}
+------------
+  
+  
+  
+<div align="left"> <h2 align="left">  One assumption of MANOVA is normally distributed data at each combination of independent and dependent variables. </h2> </div>
+  
+Row 2
+--------------
+  
+<div align="left"> <h4 align="left"> The table below shows each combination of outcome and amenity, with the p-value of a Shapiro-Wilk test for the distribution where the amenity is not present (Pvalue0) and the distribution where the amenity is present (Pvalue1). Red p-values indicate evidence of nonnormality (p-value<0.05). Gray backgrounds indicate there were not enough observations in that combination of health outcome and amenity to conduct the test. The variables that show no evidence of nonnormality are raw `Buprenorphine`, `Cigarette`, `Depression`, and `PhysicalLeisure` as well as log-transformed `BingeDrink`, `Cardiovascular`, `DiabetesAdult`, and `ObeseAdult`. </h4> </div>
+  
+------------
+  
+Row 2 {data-height=60}
+---------------
+  
+``` {r normality-check-input}
+
+#allow user to select transformation of the data to run the normality check on
+radioButtons(
+  inputId = "transformation",
+  label = "Please Select a Transformation",
+  choices =  c('None','Log','Square Root','Cube Root'),
+  inline=T
+)
+
+```
+
+
+Row 3
+---------------
+  
+  
+``` {r normality-check-table}
+
+#display the results of the normality check with the chosen transformation with the formatters
+renderFormattable(formattable(subset(results.full,Transformation==input$transformation),
+                              #center align all columns
+                              align =c("c","c","c"),
+                              list(
+                                #don't display the column that specifies the transformation chosen
+                                #since the user already can see what they chose
+                                `Transformation`=F,
+                                #add p-value formatter
+                                `Pvalue0`=pvalue.format,
+                                `Pvalue1`=pvalue.format),row.names=F
+))
+
+
+```
+
+
+```{r transform-outcomes}
+
+#because only a few variables were able to be normally distributed,
+#only those variables can remain in the analysis, and the other
+#variables that could not be mad normal must be removed
+
+#create a new dataframe
+manova.df <- data%>%
+  #apply log transformations to the variables that were only normal with a log transformation
+  mutate(BingeDrink=log(BingeDrink))%>%
+  mutate(Cardiovascular=log(Cardiovascular))%>%
+  mutate(DiabetesAdult=log(DiabetesAdult))%>%
+  mutate(ObeseAdult=log(ObeseAdult))
+#remove variables that could not be made normal
+manova.df <- manova.df[,-c(18,23:25,27)]
+#change colnames to reflect transformations
+colnames(manova.df)[c(1,15,17,20,21)] <- c('County','LogBingeDrink','LogCardiovascular','LogDiabetesAdult',
+  'LogObeseAdult')
+
+```
+
+MANOVA Assumptions Part 2 {data-orientation=columns data-navmenu='Question 1'}
+====================
+  
+
+Col 1
+------------
+
+### 
+
+<div align="center"> <h2 align="center"> Independence check: </h2> </div>
+
+The results of `independence_test()` are displayed below. No p-values<0.05 indicate no statistically significant evidence of dependence among the response variables.
+
+
+```{r independence-test}
+
+#===================TEST 2ND MANOVA ASSUMPTION: INDEPENDENCE==============
+#=========================================================================
+
+#we'll use the independence_test() function to check for independence
+# of each health outcome as a function of all amenities
+
+#create empty vectors to hold the health outcome tested and the resulting p-value
+h.vars <- pvalues <- c()
+#iterate over each health outcome
+for(h.col in c(15:22)){
+  #save results of independence test of that outcome as a function of all amenity variables
+  results <- try(independence_test(manova.df[,h.col]~Pets+Camping+Pavillions+Playground+Showers+Waterfalls+
+                      watersports+food.amenities+trails+field.sports+snow.sports+
+                      hunting.fishing+info.center,data=manova.df))
+  #if we don't get an error
+  if(class(results)!='try-error'){
+    #add the health outcome tested to the h.vars vector
+    h.vars <- append(h.vars,colnames(manova.df)[h.col])
+    #and add the resulting p-value to the pvalues vector
+    pvalues <- append(pvalues,round(pvalue(results)[1],4))
+  }
+}
+
+#save results as a dataframe
+independence.results <- as.data.frame(cbind(Outcome=h.vars,Pvalue=pvalues))
+#display results with columns centered
+independence.results%>%kable%>%kable_styling(position = "center")
+
+```
+
+
+Col 2
+------------
+
+
+###
+
+<div align="center"> <h2 align="center"> Outliers check: </h2> </div>
+
+The results of `mahalanobis()` results below show 2 observations with a p-value<0.001. MANOVA will need to be conducted with and without these outliers to check for differences.
+
+
+
+```{r outlier-check}
+
+#===================TEST 3RD MANOVA ASSUMPTION: NO OUTLIERS===============
+#=========================================================================
+
+#outliers will be identified using the p-values of the mahalanobis
+#distance for each of the observations
+
+#apply mahalnobis() function and save results as dataframe
+mahalanobis.out <- mahalanobis(data[,c(15:22)],
+   colMeans(data[,c(15:22)]),cov(data[,c(15:22)]))
+
+#calculate p-value of the mahalanobis distance for each observation
+pvalues <- round(pchisq(mahalanobis.out, df=3, lower.tail=FALSE),4)
+#create data frame of pvalues and the corresponding counties
+outlier.df <- data.frame(cbind(County=data$County,Pvalue=format(round(pvalues,10),scientific=F)))
+
+#show results
+outlier.df%>%kable%>%
+  #center columns
+  kable_styling(position='center')%>%
+  #color pvalues in red if they are <0.001, the recommended cutoff for 
+  #identying outliers via mahalanobis distance
+  row_spec(which(outlier.df$Pvalue<0.001), bold=T, color = "red")
+
+```
+
+
+MANOVA Assumptions Part 3 {data-orientation=rows data-navmenu='Question 1'}
+====================
+  
+
+###
+
+<div align="center"> <h2 align="center"> Multicollinearity check: </h2> </div>
+
+
+
+The results of `cor()` are displayed below. The darkness of the background color corresponds with the magnitude of the correlation. None of the correlations are >=0.7, indicating no evidence of multicollinearity.
+
+
+
+```{r multicollinearity-check}
+
+
+#===================TEST 4TH MANOVA ASSUMPTION: NO MULTICOLLINEARITY======
+#=========================================================================
+
+#calculate correlations for all health outcomes
+cor.results <- as.data.frame(round(cor(manova.df[15:22]),3))
+
+#create formatter to identify the strength of the correlations
+cor.format <- formatter("span", 
+                        #set font size
+                        style = x ~ style(font.size = "20px",
+                                        #change color of the font if the correlation is 1 for visibility purposes
+                                        color=ifelse(x==1,'white','black'),
+                                        #change the color of the background based on the value of the correlation
+                                        background = ifelse(abs(x)<0.2,"#E8FCD8",
+                                                            ifelse(abs(x)<0.4,'#C6DDB4',
+                                                                    ifelse(abs(x)<0.6,'#A6BF92',
+                                                                           ifelse(abs(x)<0.8,'#8CAA76',
+                                                                                  '#5B6F4B'))))))
+
+
+
+#display results as a table
+renderFormattable(formattable(cor.results,
+                              #center align all columns
+                              align =rep("c",8),
+                              list(
+                                #apply formatter to all health outcomes
+                                `LogBingeDrink`=cor.format,
+                                `Buprenorphine`=cor.format,
+                                `LogCardiovascular`=cor.format,
+                                `Cigarette`=cor.format,
+                                `Depression`=cor.format,
+                                `LogDiabetesAdult`=cor.format,
+                                `LogObeseAdult`=cor.format,
+                                `PhysicalLeisure`=cor.format),
+                              #include row names to specificy the health outcome
+                              row.names=T
+))
+
+```
+
+
+
+MANOVA Assumptions Part 4 {data-orientation=cols data-navmenu='Question 1'}
+====================
+
+Col 1
+------------
+
+###
+  
+<div align="center"> <h2 align="center"> Equal variance check: </h2> </div>
+
+The table below shows a p-value testing the assumption of equal variance for each combination of predictor and response variable in the dataset. P-values shown in red indicate statistically significant evidence of unequal variance.
+  
+  
+```{r variance-check-setup, max.height='100px'}
+
+#===================TEST 5TH MANOVA ASSUMPTION: EQUAL VARIANCE============
+#=========================================================================
+
+#next, we need to test for equal variance with a levene test
+#for each health outcome at each level of each amenity variable
+
+#create vectors to hold pvalues, amenities, and health outcomes
+h.vars <- a.vars <- pvalues <- c()
+
+#iterate over all health variables:
+for(h.col in 15:22){
+  #iterate over each amenity variable:
+  for(a.col in 2:14){
+    #test variance with levene test
+    results <- leveneTest(manova.df[,h.col]~manova.df[,a.col])
+    #add the name of the health outcome tested to the h.vars vector
+      h.vars <- append(h.vars,colnames(manova.df[h.col]))
+      #add the name of the amenity  tested to the c.vars vector
+      a.vars <- append(a.vars,colnames(manova.df[a.col]))
+      #add the resulting pvalue to the pvalues vector
+      pvalues <- append(pvalues,round(results$`Pr(>F)`[[1]],4))
+  }
+}
+
+#combine results into a dataframe
+levene.results <- data.frame(cbind(Outcome=h.vars,Amenity=a.vars,Pvalue=pvalues))
+
+#show results as kable
+levene.results%>%kable%>%
+  #specify the styling and alignment
+  kable_styling(bootstrap_options = c("responsive"),position='center')%>%
+  #apply formatter that colors rows red if the pvalue is <0.05
+  row_spec(which(levene.results$Pvalue<0.05), bold=T, color = "red")
+
+
+```
+
+
+Col 2
+-----------
+
+###
+
+<div align="center"> <h2 align="center"> Sample size check: </h2> </div>
+
+MANOVA is not extremely sensitive to violations of this assumption as long as the matrices are not too different and sample sizes are equal (the largest sample is less than 50% greater than the smaller sample). The table below shows of the three combinations with unequal variance, two combinations have unequal samples. Therefore, the assumption of equal variance is still not met.
+
+
+```{r samp-size-check-table}
+
+#===================CHECK SAMPLE SIZES OF VIOLATING COMBINATIONS============
+#===========================================================================
+
+
+#create empty vector to hold samply size equality results
+approx.equal <- c()
+
+#create function to check sample sizes of the combinations that have unequal variance
+samp.size.funct <- function(h.cols,a.cols){
+  #iterate over the three outcomes with unequal variance
+  for(index in 1:3){
+    #calculate sample sizes at each level of the amenity 
+    results <- table(manova.df[,a.cols[index]])
+    #save the results as "not approximately equal" if the largest sample is 
+    #greater than the smallest sample by 50% or more
+    if((results[1]/results[2])>1.5|(results[2]/results[1])>1.5){
+      approx.equal <- append(approx.equal,'No')
+    } else {
+      #if not, save the result as "approximately equal"
+      approx.equal <- append(approx.equal,'Yes')
+    }
+  }
+  #combine results into a dataframe with the health outcomes and amenities they are associated with
+  samp.size.results <- data.frame(cbind(Outcome=c('LogBingeDrink','LogBingeDrink','LogDiabetesAdult'),
+                                  Amenity=c('field.sports','info.center','waterfalls'),
+                                  Approximately.Equal=approx.equal))
+  #return results
+  return(samp.size.results)
+}
+
+#apply the function for each combination of health outcomes and variables
+#with unequal variance
+samp.size.results <- samp.size.funct(c(15,15,20),c(11,14,7))
+
+#display results as kable
+samp.size.results%>%kable%>%row_spec(c(2,3), 
+                                     #color background yellow if the sample sizes are not approximately equal
+                                     background  = "yellow")%>%kable_styling(position = "center")
+
+```
+
+###
+
+<br />
+
+Although the assumption is not met, the size of each sample can provide insights into the results of the MANOVA test. Combinations where the larger sample also has the higher variance are robust to type I errors. For the combinations below, the first and third combinations have larger variance in the smaller sample. Therefore, we can be less confident about the MANOVA rejecting the null hypothesis for these combinations of predictor and response variables. Because of this, `LogBingeDrink` and `LogDiabetesAdult` are removed from the analysis
+
+```{r samp.size2}
+
+#===================TAKE A DEEPER LOOK AT SAMPLE SIZES====================
+#=========================================================================
+
+#create empty vectors to hold the size of each sample, the variance
+#of each sample, and the variance of the larger group
+sample0 <- sample1 <- var0 <- var1 <- var.vec <- c()
+
+#create function to calculate sample sizes and variance in the larger sample
+#given the health outcome and amenity columns to evaluate
+samp.size.funct2 <- function(h.cols,a.cols){
+  #iterate over each problematic health outcome
+  for(index in 1:3){
+    #calculate sample sizes at each level of each amenity in the a.cols vector
+    results <- table(manova.df[,a.cols[index]])
+    #save the size of the sample with 0 for the amenity
+    sample0 <- append(sample0,results[[1]])
+    #save the size of the sample with 1 for the amenity
+    sample1 <- append(sample1,results[[2]])
+    #calculate variances of the sample with 0 for the amenity
+    var0 <- var(manova.df[manova.df[,a.cols[index]]==0,][,h.cols[index]])
+    #calculate variances of the sample with 1 for the amenity
+    var1 <- var(manova.df[manova.df[,a.cols[index]]==1,][,h.cols[index]])
+    #save the variance of whichever sample size is larger
+    var.vec <- append(var.vec,ifelse(var0>var1,0,1))
+  }
+
+  #combine results into a dataframe
+  var.results <- data.frame(cbind(Outcome=c('LogBingeDrink','LogBingeDrink','LogDiabetesAdult'),
+                                  Amenity=c('field.sports','info.center','waterfalls'),
+                                  Sample.0=sample0,Sample.1=sample1,
+                                  Larger.Variance=var.vec))
+  #return results
+  return(var.results)
+}
+
+#run function for each problematic combination
+var.results <- samp.size.funct2(c(15,15,20),c(11,14,7))
+
+#display results as kable
+var.results%>%kable%>%row_spec(c(1,3), 
+            #color background yellow if the smaller sample has the larger variance
+            background  = "yellow")%>%
+            #center the columns
+            kable_styling(position = "center")
+
+```
+
+
+
+```{r remove-vars}
+
+#because two of the health outcomes have larger variance in the smaller
+#sample, they will not be robust to violating the equal variance assumption
+#and therefore must be removed from the analysis
+
+#remove the variable with unequal covariance matrix and unequal samples
+manova.df <- manova.df[,-c(15,20)]
+
+```
+
+
+
+MANOVA {data-orientation=columns data-navmenu='Question 1'}
+====================
+  
+  
+Col 1
+--------------------
+
+### {data-height=1000}
+
+```{r MANOVA-funct}
+
+#===================CREATE AND RUN A MANOVA FUNCTION======================
+#=========================================================================
+
+#create MANOVA function that takes a dataset and the health outcome variables
+#to be tested as inputs
+manova.funct <- function(data,h.cols){
+  
+  #create vector to hold the health outcome, or dependent, variables
+  dependent.vars <- c()
+  
+  #iterate over all columns provided for health variables
+  for(h.col in h.cols){
+    #add each health variable to the dependent.vars variable
+    dependent.vars <- cbind(dependent.vars,data[,h.col])
+  }
+  
+  #fit MANOVA on the chosen health variables based on all amenities
+  fit <- manova(dependent.vars~data$Pets+data$Camping+data$Pavillions+data$Playground+
+                  data$Showers+data$watersports+data$Waterfalls+data$food.amenities+
+                  data$trails+data$field.sports+data$snow.sports+data$hunting.fishing+
+                  data$info.center,data=data)
+  
+  #display results
+  return(fit)
+}
+
+#run the function for all health variables in the manova dataset
+manova.full <- manova.funct(manova.df,c(15:20))
+
+#convert results to dataframe
+manova.full.df <- as.data.frame(summary(manova.full)$stats)[-13,]
+#capitalize column names
+colnames(manova.full.df) <- c('DF','Pillai','F-statistic','Num DF','Den DF','P-value')
+#make rownames the first column to specify which amenity variable is being tested
+manova.full.df$Variable <- rownames(manova.full.df)
+#remove the name of the dataframe from the variable names
+manova.full.df$Variable <- gsub(".*\\$", "", manova.full.df$Variable)
+#remove rownames
+rownames(manova.full.df) <- NULL
+#move last column to first column so the first column shows the amenity name
+manova.full.df <- manova.full.df[,c(7,1:6)]
+#round results
+manova.full.df[,c(3,4,7)] <- round(manova.full.df[,c(3,4,7)],3)
+
+#display results as kable
+manova.full.df%>%kable%>%
+  #center the results
+  kable_styling(position = "center")%>%
+  #color row 4 because it has a pvalue<0.05, indicating evidence of a difference in health outcomes
+  row_spec(4,background='yellow')
+
+```
+
+###
+
+The table above shows the results of a MANOVA test conducted on the response variables that fit the assumptions: `Buprenorphine`, `LogCardiovascular`,`Cigarette` `Depression`, `LogObeseAdult`, and `PhysicalLeisure.` Playgrounds has a p-value<0.05, indicating statistically significant evidence of a difference in health outcomes based on the availability of playgrounds.  
+
+
+Col 2
+----------
+
+###
+
+```{r manova-coeffs-full}
+
+#===================CALCULATE COEFFICIENTS==============================
+#=========================================================================
+
+#next, we will conduct another manova of all health outcomes
+#over only the amenity variable that showed significance, playgrounds
+
+#create vector of dependent vars to be used in the manova
+dep.vars <- cbind(manova.df$Buprenorphine,manova.df$LogCardiovascular,manova.df$Cigarette,
+                  manova.df$Depression,manova.df$LogObeseAdult,manova.df$PhysicalLeisure)
+
+
+#run manova for all health outcomes over playgrounds only
+manova.coef <- manova(dep.vars~manova.df$Playground,data=manova.df)$coefficients
+
+#create a vector of the names of the health outcomes
+outcomes <- c('Buprenorphine','LogCardiovascular','Cigarette',
+                  'Depression','LogObeseAdult','PhysicalLeisure')
+
+
+#===================CALCULATE COEFFICIENTS==============================
+#=========================================================================
+
+#save coefficients for each of the health outcomes
+coeffs <- c(manova.coef[2,][1],manova.coef[2,][2],manova.coef[2,][3],
+            manova.coef[2,][4],manova.coef[2,][5],manova.coef[2,][6])
+
+#save a results dataframe with the health outcome names and the corresponding coefficients
+coeff.res <- as.data.frame(rbind(outcomes,
+                                 round(coeffs,3)))
+#change rownames
+rownames(coeff.res) <- c('Outcomes','Coefficients')
+#remove column names
+colnames(coeff.res) <- NULL
+
+#display results as kable
+coeff.res%>%kable%>%
+  #center columns
+  kable_styling(position = "center")%>%
+  #bold the first row
+  row_spec(1,bold=T)%>%
+  #bold the first column
+  column_spec(1,bold=T)
+
+
+```
+
+###
+
+The  table above shows the coefficients of the MANOVA for playgrounds, the predictor variable that shows statistical evidence of a relationship with health outcomes. The coefficients  explain the difference in the expected mean of each health outcome when that variable is present versus when that variable is not present. For example, based on these results, it would be expected that the mean prevalence of adults who participate in physical leisure activities where playgrounds are present is about 0.764% greater than a county where playgrounds are not present.
+
+###
+
+```{r backtransform-logcardio}
+
+#===================CREATE FUNCTION TO BACKTRANSFORM COEFFICIENTS=========
+#=========================================================================
+
+#two of the health outcomes, cardiovascular and obseseadult, were log
+#transformed, meaning the coefficients must be back transformed
+#in order to be understood on the original scale
+
+#create a function that will calculate the raw mean and show the steps 
+#to complete the transformation of the raw mean and the back transformation of the coefficient
+
+#the function will take as inputs the coefficient for each log-transformed
+#health variable and the index of these health variables in each of the datasets
+#that will need to be accessed: the original raw dataset and the log transformed manova dataset
+backtrans.funct <- function(coeff.result,data.index,manova.df.index){
+  #calculate the mean of the health variable in the raw dataset where playgrounds are not available
+  rawmean <- round(mean(data[data$Playground==0,][,data.index]),3)
+  #calculate the mean of the health variable in the log transformed dataset where playgrounds are not available
+  logmean <- round(mean(manova.df[manova.df$Playground==0,manova.df.index]),2)
+  #calculate the expected log transformed mean when playgrounds are available
+  #by adding the coefficient from the manova to the log transformed mean
+  new.log.mean <- logmean+as.numeric(coeff.result)
+  #back transform the log transformed expected mean by exponentiating it
+  backtransform.log <- round(exp(new.log.mean),2)
+  #calculate the difference in the raw mean and the back transformed expected mean
+  difference <- round(as.numeric(str_sub(backtransform.log,end = -2))
+                            -as.numeric(str_sub(rawmean,end = -2)),2)
+  
+  # save results
+  log.back.res <- cbind(rawmean,logmean,
+                        coeff.result,new.log.mean,
+                        backtransform.log,difference)
+  
+  #return the results
+  return(log.back.res)
+}
+
+
+#===================APPLY THE FUNCTION====================================
+#=========================================================================
+
+#apply the function to the logcardiovascular variable using its coefficient
+#from the manova, its index in the original dataset (17), and its
+#index in the transformed manova dataset (16)
+cardio.backtrans.res <- backtrans.funct(coeff.res[2,2],17,16)
+#repeat with the correct indices for logobeseadult
+adultobese.backtrans.res <- backtrans.funct(coeff.res[2,5],22,19)
+
+#save results as dataframe
+log.back.res <- rbind(cardio.backtrans.res,adultobese.backtrans.res)
+#remove the rownames
+rownames(log.back.res) <- NULL
+#add math symbols where needed to show the process
+log.back.res <- cbind(log.back.res[,1:2],'$+$',log.back.res[,3],
+                      '=',log.back.res[,4],'exp',log.back.res[,5:6])
+#add column to specify the health outcome
+log.back.res$Variable <- c('Cardiovascular Disease','Obese Adults')
+#move that column to be the first column
+log.back.res <- log.back.res[,c(10,1:9)]
+#rename the columns
+colnames(log.back.res) <- c('Variable','Raw Mean','log(Raw Mean)',' ',
+                            'log(Coefficient)',' ','New log(Mean)',' ',
+                            'New Raw Mean','Difference in Means')
+
+#format the results as percentages for easy understanding
+log.back.res[,9] <- paste(log.back.res[,9],'%',sep='')
+log.back.res[,10] <- paste(log.back.res[,10],'%',sep='')
+
+
+#===================DISPLAY RESULTS=======================================
+#=========================================================================
+
+
+#display results as kable
+log.back.res%>%kable%>%
+  #center the columns
+  kable_styling(position='center')%>%
+  #bold the first column'
+  column_spec(1,bold=T)%>%
+  #add borders between columns to improve readability
+  column_spec(c(1,2),border_right=T)%>%
+  column_spec(10,border_left=T)
+
+```
+
+###
+
+Because cardiovascular disease and adult obesity were log-transformed, a back-transformation must be done in order to interpret their MANOVA coefficients on the original scale. The table above shows each step done in the back-transformation process. The first column specifies the health outcome being evaluated. The second column shows the raw mean percentage in the original dataset where playgrounds are not available, and the third column shows the log-transformed raw mean for counties where playgrounds are not available. Next, the log-transformed MANOVA coefficient is added to the log-transformed means as an estimate of the variable when playgrounds are present. The result is shown in the new log-transformed mean column. This new mean is then back-transformed to the original scale by exponentiating it. The new mean on the original scale is shown, along with the difference between the original raw mean where playgrounds are not present and the new back-transformed estimated mean where playgrounds are present.
+
+
+
+Post-Hoc LDA {data-orientation=rows data-navmenu='Question 1'}
+====================
+
+Row 1 {data-height=50}
+-----------
+
+### 
+
+<div align="center"> <h2 align="center"> LDA Plot </h2> </div>
+
+Row 2 {data-height=100}
+-----------
+
+###
+
+Linear Discriminant  Analysis (LDA) identifies combinations of the predictor variables that best separate the groups among the response variables. The first two combinations (LD1 and LD2) explain the largest amount of variance in the data. The values of these combinations are on each axis, and each point in the plot represents where each observation in the data is located among these values. The observations in teal have the chosen amenity, and the observations in red do not. The farther a point is from another point, the more those points differ. There does not appear to be any visible separation between the points within most of the groups, implying these groups may not differ much in regards to health outcome responses. Although playgrounds showed statistically significant evidence of a difference in health outcomes, LDA does not display a visible difference.
+
+
+Row 3 
+------------
+
+### {data-width=200}
+  
+```{r manova-input}
+
+#allow user to select an amenity
+selectInput(inputId = "amenity1",
+            label = "Please Select an Amenity",
+            choices =  colnames(manova.df)[2:14])
+
+```
+
+### {data-width=900}
+
+```{r lda}
+
+#create LDA plot
+renderPlotly({
+  #create subset of data with user amenity choice and all health outcome variables
+  sub <- manova.df%>%dplyr::select(input$amenity1,Buprenorphine,
+                                   LogCardiovascular,Cigarette,
+                                   Depression,LogObeseAdult,PhysicalLeisure)
+  #apply lda
+  lda.out <- lda(sub[,1]~dep.vars,CV=F,tol=0)
+  #save predictions from the lda results
+  lda.df <- cbind(IndependentVariable=sub[,1],lda = predict(lda.out)$x)
+  #create a plot of the predictions
+  lda.plot <- ggplot(data.frame(lda.df))+
+    #color the points based on the amenity
+    geom_point(aes(x = LD1, y = LD2, color = sub[,1]), size = 4) +
+    #change the theme
+    theme_classic()+
+    #add legend
+    guides(color=guide_legend(title=colnames(sub)[1]))
+  
+  #display the plot
+  ggplotly(lda.plot)
+
+})
+
+```
+
+
+
+MANOVA Without Outliers {data-orientation=columns data-navmenu='Question 1'}
+===============
+  
+  
+Row 1 {data-width=300}
+--------------------
+  
+### {data-height=800}
+  
+
+```{r manova-health-rating-no-outs}
+
+
+#===================MANOVA WITHOUT OUTLIERS===============================
+#=========================================================================
+
+#because two outliers were identified via mahalanobis distance,
+#we need to recreate the MANOVA witohut these outliers to see if the results change
+
+#create subset of data without outliers
+manova.data.no.outs <- manova.df[manova.df$County!='Seneca'& manova.df$County!='Bronx',]
+
+#run the MANOVA function for all health variables over all data on
+#the new subset without the outliers
+manova.no.outs <- manova.funct(manova.data.no.outs,c(15:20))
+
+#save results as dataframe
+manova.no.outs <- as.data.frame(summary(manova.full)$stats)[-13,]
+#capitalize column names
+colnames(manova.no.outs) <- c('DF','Pillai','F-statistic','Num DF','Den DF','P-value')
+#make rownames the first column
+manova.no.outs$Variable <- rownames(manova.no.outs)
+#remove the unneeded letter from variable names
+manova.no.outs$Variable <- gsub(".*\\$", "", manova.no.outs$Variable)
+#remove rownames
+rownames(manova.no.outs) <- NULL
+#move last column to first column so the variable name is at the front
+manova.no.outs <- manova.no.outs[,c(7,1:6)]
+#round the results
+manova.no.outs[,c(3,4,7)] <- round(manova.no.outs[,c(3,4,7)],3)
+
+#display results as kable
+manova.no.outs%>%kable%>%
+  #center the kable
+  kable_styling(position = "center")%>%
+  #highlight the variable with pvalue<0.05
+  row_spec(4,background='yellow')
+
+```
+
+
+###
+
+The table above shows the results of a MANOVA conducted on the response variables that fit the assumptions: `Buprenorphine`, `LogCardiovascular`,`Cigarette` `Depression`, `LogObeseAdult`, and `PhysicalLeisure` when the two outliers are removed. The results are the same.  \
+
+The Linear Discriminate Analysis (LDA) plot to the right shows the lack of separation between observations with the amenity (shown in teal) and those without (shown in red), minus the outlier observations. 
+
+
+Col 2 
+------------
+  
+  
+```{r manova-input2}
+
+#===================LDA WITHOUT OUTLIERS==================================
+#=========================================================================
+
+
+#create vector of dependent vars without the outliers
+dep.vars2 <- cbind(manova.data.no.outs$Buprenorphine,
+                   manova.data.no.outs$LogCardiovascular,manova.data.no.outs$Cigarette,
+                  manova.data.no.outs$Depression,manova.data.no.outs$LogObeseAdult,
+                  manova.data.no.outs$PhysicalLeisure)
+
+#allow user to select an amenity
+selectInput(inputId = "amenity2",
+            label = "Please Select an Amenity",
+            choices =  colnames(manova.data.no.outs)[2:14])
+
+```
+
+###
+
+```{r lda2}
+
+#create another LDA plot of the data without outliers
+renderPlotly({
+  #create subset of data with user choice
+  sub <- manova.data.no.outs%>%dplyr::select(input$amenity2,
+                                             Buprenorphine,LogCardiovascular,Cigarette,
+                                   Depression,LogObeseAdult,PhysicalLeisure)
+  #run LDA on the data without the outliers
+  lda.out <- lda(sub[,1]~dep.vars2,CV=F,tol=0)
+  #save predictions from the lda results
+  lda.df <- cbind(IndependentVariable=sub[,1],lda = predict(lda.out)$x)
+  #create predictions plot
+  lda.plot <- ggplot(data.frame(lda.df))+
+    #color the points based on the amenity chosen
+    geom_point(aes(x = LD1, y = LD2, color = sub[,1]), size = 4) +
+    theme_classic()+
+    #add legend
+    guides(color=guide_legend(title=colnames(sub)[1]))
+  
+  #display the plot
+  ggplotly(lda.plot)
+})
+
+
+```
+
+
+ANOVA {data-orientation=rows data-navmenu='Question 1'}
+====================
+  
+  
+Row 1 {data-height=150}
+---------
+  
+###
+
+<div align="center"> <h2 align="center"> ANOVA of Health Rating </h2> </div>
+  
+  
+Row 2 {data-height=150}
+------------
+
+###
+  
+<div align="center"> <h5 align="center"> The table below displays the results of an ANOVA conducted on all observations for overall health rating only. Independent variables that showed statistically significant evidence of association are highlighted in yellow. These results indicate two park amenities, camping and trails, may be associated with a change in overall health rating. </h5> </div>
+
+Row 3 {data-height=800}
+---------
+
+###
+  
+```{r anova-health-rating}
+
+#===================ANOVA OF OVERALL HEALTH RATING========================
+#=========================================================================
+
+#conduct ANOVA of only overall health rating over all amenities
+anova.out.full <- aov(data$HealthRating~data$Pets+data$Camping+
+                        data$Pavillions+data$Playground+
+                        data$Showers+data$Waterfalls+data$watersports+
+                        data$food.amenities+
+                        data$trails+data$field.sports+data$snow.sports+
+                        data$hunting.fishing+
+                        data$info.center,data=data)
+
+#create dataframe of results
+anova.full.df <- as.data.frame(cbind(colnames(manova.df)[c(2:12,14)],
+#round results
+round(matrix(unlist(summary(anova.out.full)),ncol=5),3)[-13,]))
+#capitalize column names
+colnames(anova.full.df) <- c('Amenity','DF','Sum Sq','Mean Sq','F-statistic','P-value')
+
+#display results as kable
+anova.full.df%>%kable%>%
+  #highlight rows with pvalue<0.05
+  row_spec(c(2,9), background  = "lightyellow")%>%
+  #center all columns
+  kable_styling(position = "center")
+
+```
+
+Row 4 {data-height=150}
+---------
+  
+###
+
+<div align="center"> <h2 align="center"> Post-Hoc Tukey-Kramer </h2> </div>
+  
+Row 5 {data-height=150}
+------------
+  
+###
+
+<div align="center"> <h5 align="center"> The table below displays the results of a Tukey-Kramer contrast that only includes the independent variables that were found to be significant in the ANOVA above. The Tukey-Kramer test controls for  family-wise error by adjusting p-values based on the number of comparisons made. The independent variables that showed statistically significant evidence of association via the Tukey-Kramer contrast are highlighted in yellow. </h5> </div>
+  
+  
+  
+Row 6 {data-height=280}
+---------
+  
+###
+  
+```{r post-hoc-anova-funct}
+
+#===================TUKEY KRAMER POST HOC CONTRAST========================
+#=========================================================================
+
+#create empty vectors to hold results:
+#the expected difference in mean, the low and high ends of the confidence interval,
+#and the p-values
+diff <- lo <- hi <- p <- c()
+
+#conduct Tukey on overall health rating over the 
+#two significant amenities and save results
+results <- TukeyHSD(aov(data$HealthRating~data$Camping+
+                          data$trails,data=data))
+#extract the estimated difference, confidence intervals, and p-value
+#from the results and add them to the empty vectors
+for(each in 1:2){
+  diff <- append(diff,round(results[[each]][1],3))
+  lo <- append(lo,round(results[[each]][2],3))
+  hi <- append(hi,round(results[[each]][3],3))
+  p <- append(p,round(results[[each]][4],3))
+}
+
+#combine results into a dataframe
+res <- as.data.frame(cbind(Amenity=c('Camping','Trails'),
+                           Difference=diff,LowCI=lo,HiCI=hi,Pvalue=p))
+#display results as kable
+res%>%kable%>%
+  #highlight row where p-value<0.05
+  row_spec(2, background  = "yellow")%>%
+  #center all columns
+  kable_styling(position = "center")
+
+```
+
+
+Question 1 Conclusion {data-orientation=rows data-navmenu='Question 1'}
+====================
+  
+
+<br />
+<br />
+  
+<div align="center"> <h1 align="center"> **Question 1 Conclusion:** </h1> </div>
+  
+<br />
+
+  
+<div align="center"> <h3 align="center"> **Question 1:	Do mean health outcomes change based on the state park amenities available and, if so, what is the magnitude and direction of the relationship(s)?** </h3> </div>
+
+<br />
+  
+<div align="center"> <h4 align="center"> When all health outcomes are included (prevalence of buprenorphine prescriptions, cardiovascular diagnoses, cigarette useage, depression diagnoses, adult obesity, and adult physical leisure), there is statistically significant evidence of a difference in the mean of all health outcomes in a county based on availability of playgrounds in that county. \
+<br />
+<br />
+There is statistically significant evidence of an estimated 4.557 difference in the mean overall health rating in a county when trails are available in that county versus when they are not (95% confidence interval 0.755-8.359, p-value=0.02). </h4> </div>
+  
+Question 2 Defined {data-orientation=rows data-navmenu='Question 2'}
+====================
+  
+<div align="center"> <h2 align="center"> **Question 2:	Does the relationship between park amenities and health outcomes vary between groups of counties with different ranges of health outcomes and, if so, what is the magnitude and direction of the relationship(s) within each group?** </h2> </div>
+  
+###
+  
+<div align="center"> <h3 align="center"> 
+  
+<br />
+<br />
+  
+**Step 1: Cluster observations based on health outcomes**\   
+<br />
+*This resulted in 3 groups of counties with health outcomes similar to each other and different from those in other groups.*
+<br />
+<br />
+**Step 2: Check MANOVA/ANOVA assumptions**\   
+<br />
+- Multivariate Normality\
+*Variables remaining: Cardiovascular Diagnoses, Square Root-Transformed Cigarette Usage, Depression, Childhood Obesity, and Adults with a Regular Health Provider*\
+<br />
+- Independence\
+*All variables met this assumption all clusters*\
+<br />
+- Homogeneity of Variance\
+- *Variables remaining: Square Root-Transformed Cigarette Usage, Childhood Obesity, and Adults with a Regular Health Provider*\
+<br />
+- No multicollinearity\
+*All variables met this assumption all clusters*\
+<br />
+- No outliers\   
+*All variables met this assumption within all clusters*
+
+<br />
+**Step 3: Conduct MANOVA**\   
+<br />
+- Post-hoc LDA\
+<br />
+*No associations in clusters 1 & 2*\
+*Statistically significant assocation between health outcomes and waterfalls and food amenities in cluster 3*\
+<br />
+<br />
+**Step 4: Conduct Nonparametric ANOVA**\   
+<br />
+- Post-hoc Tukey-Kramer\
+<br />
+*No statistically significant results*
+<br />
+<br />
+
+</h3> </div>
+
+
+
+Cluster the Data {data-orientation=columns data-navmenu='Question 2'}
+====================
+  
+Col 1
+------------
+  
+```{r cluster-data}
+
+#===================CLUSTER THE DATA BY HEALTH OUTCOMES===================
+#=========================================================================
+
+#set seed for reproducibility
+set.seed(1)
+#use kmeans clustering on the standardized data because
+#that data has only the health outcomes
+#use 3 clusters and 1000 different starts
+km.out <- kmeans(data.standardized[,2:14],3,nstart=1000)
+#change ordering of clusters
+clusters <- km.out$cluster
+clusters[clusters==1] <- 'mid'
+clusters[clusters==2] <- 1
+clusters[clusters=='mid']=2
+#add clusters to data
+cluster.data <- cbind(data,cluster=as.factor(clusters))
+
+```
+
+###
+
+```{r lowest-within-cluster-ss, fig.dim=c(6,6)}
+
+#===================USE BOOTSTRAPPING TO FIND OPTIMUM NUMBER OF CLUSTERS=
+#=========================================================================
+
+#set values of B bootstrap repetitions and numbers of K clusters
+B <- 1:50
+K <- 2:10
+#create vector to hold within cluster sum of squares
+within.ss.vec <- c()
+
+#set seed for reproducibility
+set.seed(1)
+
+#iterate through all K values
+for(k in K){
+  #iterate through all B values
+  for(b in B){
+    #create random sample from the rows of the data with replacement
+    sample.indices <- sample(1:nrow(data.standardized),nrow(data.standardized),replace=T)
+    #fit kmeans model on the sample
+    km.out <- kmeans(data.standardized[,-c(1,15)][sample.indices,],centers=k,nstart=20)
+    #append the resulting within sum of squares to the vector
+    within.ss.vec <- append(within.ss.vec,mean(km.out$withinss))
+  }
+}
+
+#find the average within sum of squares at each value of K
+average.within.ss <- apply(matrix(within.ss.vec,nrow=50),2,mean)
+#create dataframe of results
+within.ss.df <- data.frame(cbind(average.within.ss,K))
+
+#plot the average sum of squares for each k
+ggplot(within.ss.df,aes(K,average.within.ss))+
+  #change line width and point sizes
+  geom_line(linewidth=2)+geom_point(size=5)+
+  #add titles
+  labs(title='Within Cluster Sum of Squares',y='Within Cluster SS')
+
+```
+
+###  {data-height=150}
+
+The plot above shows the within-cluster sum of squares based on the number of clusters. A larger number of clusters results in a lower sum of squares, meaning the more clusters they are, the more alike observations within each cluster are. 
+
+### {data-height=150}
+
+
+```{r cluster-input, a}
+
+#allow user to choose number of clusters from k=2:14
+sliderInput(inputId='cluster.n', label='Select a Number of Clusters: ', 1, 6, 
+            value=1)
+
+```
+
+
+###  {data-height=150}
+
+The slider above allows you to choose a number of clusters. The data is displayed in the plots on the right with the color of each observation indicating the cluster it is assigned to based on the slider input.
+
+Col 2 
+--------
+  
+  
+### {data-height=350}
+  
+```{r 3d-cluster-plot}
+
+#===================PLOT CLUSTERS FOR USER-CHOSEN VALUE OF K==============
+#=========================================================================
+
+#display 3D plot for the first three health outcomes
+renderRglwidget({
+  #cluster the data with user chosen number of clusters
+  cluster.sub <- cluster.data%>%
+    mutate(cluster=(kmeans(data.standardized[,2:14],
+                           input$cluster.n,nstart=1000)$cluster))%>%
+                            mutate(ID=(1:length(cluster.data[,1])))
+  #close 3D plots if any are open
+  try(close3d())
+  #open a 3D plot
+  rgl.open(useNULL=T)
+  #create the 3D scatterplot with the user-chosen number of clusters
+  scatter3d(x=cluster.sub[,15], y=cluster.sub[,16], z=cluster.sub[,17],
+            surface=F,point.col=as.numeric(cluster.sub$cluster),
+            sphere.size=1.5,groups=as.factor(cluster.sub$cluster),
+            #add labels
+          xlab=colnames(cluster.sub[15]),
+          ylab=colnames(cluster.sub[16]),
+          zlab=colnames(cluster.sub[17]))
+  rglwidget()
+})
+
+```
+
+
+### {data-height=350}
+
+```{r 3d-cluster-plot2}
+
+#display 3D plot for the next three health outcomes
+renderRglwidget({
+  #create the data with user chosen number of clusters
+  cluster.sub <- cluster.data%>%
+    mutate(cluster=(kmeans(data.standardized[,2:14],input$cluster.n,nstart=1000)$cluster))%>%
+    mutate(ID=(1:length(cluster.data[,1])))
+  #create function to create 3D plots with different health variables
+  try(close3d())
+  
+  rgl.open(useNULL=T)
+  scatter3d(x=cluster.sub[,18], y=cluster.sub[,19], z=cluster.sub[,20],surface=F,
+            point.col=as.numeric(cluster.sub$cluster),sphere.size=1.5,groups=as.factor(cluster.sub$cluster),
+            xlab=colnames(cluster.sub[18]),
+            ylab=colnames(cluster.sub[19]),
+            zlab=colnames(cluster.sub[20]))
+  rglwidget()
+})
+
+```
+
+Col 2 
+-------------
+  
+### {data-height=350}
+  
+```{r 3d-cluster-plot3}
+
+#display 3D plot for the next three health outcomes
+renderRglwidget({
+#create the data with user chosen number of clusters
+cluster.sub <- cluster.data%>%
+  mutate(cluster=(kmeans(data.standardized[,2:14],input$cluster.n,nstart=1000)$cluster))%>%
+  mutate(ID=(1:length(cluster.data[,1])))
+#create function to create 3D plots with different health variables
+try(close3d())
+  
+rgl.open(useNULL=T)
+scatter3d(x=cluster.sub[,21], y=cluster.sub[,22], z=cluster.sub[,23],surface=F,
+            point.col=as.numeric(cluster.sub$cluster),sphere.size=1.5,groups=as.factor(cluster.sub$cluster),
+            xlab=colnames(cluster.sub[21]),
+            ylab=colnames(cluster.sub[22]),
+            zlab=colnames(cluster.sub[23]))
+rglwidget()
+})
+
+```
+
+
+### {data-height=350}
+
+```{r 3d-cluster-plot4}
+
+#display 3D plot for the final three health outcomes
+renderRglwidget({
+  #create the data with user chosen number of clusters
+  cluster.sub <- cluster.data%>%
+    mutate(cluster=(kmeans(data.standardized[,2:14],input$cluster.n,nstart=1000)$cluster))%>%
+    mutate(ID=(1:length(cluster.data[,1])))
+  #create function to create 3D plots with different health variables
+  try(close3d())
+  
+  rgl.open(useNULL=T)
+  scatter3d(x=cluster.sub[,24], y=cluster.sub[,25], z=cluster.sub[,26],surface=F,
+            point.col=as.numeric(cluster.sub$cluster),sphere.size=1.5,groups=as.factor(cluster.sub$cluster),
+            xlab=colnames(cluster.sub[24]),
+            ylab=colnames(cluster.sub[25]),
+            zlab=colnames(cluster.sub[26]))
+  rglwidget()
+})
+
+```
+
+
+
+Group Variance {data-orientation=columns data-navmenu='Question 2'}
+====================
+  
+<div align="center"> <h3 align="center"> The boxplots below show the distribution of overall health rating within each cluster. There is a visible difference in overall health rating between the clusters, with cluster 3 being lowest and cluster 2 being highest. While most plots show a relatively low mean overall health rating for cluster 3, most plots show that overall health rating is more or less equal within the other two clusters. </h3> </div>
+  
+  
+```{r, cluster-variance-boxplots, fig.show="hold", fig.dim=c(5.25,3.5)}
+
+#========CREATE BOXPLOT FUNCTION TO SHOW WITHIN AND BETWEEN VARIANCE======
+#=========================================================================
+
+#create the function with an amenity column number as the input
+boxplot.var.funct <- function(a.col){
+  #create a boxplot of the overall health rating within each cluster
+  #based on the availability of the amenity
+  p <- ggplot(cluster.data,(aes(cluster,HealthRating,fill=cluster.data[,a.col])))+
+    geom_boxplot()+
+    #add labels
+    guides(fill=guide_legend(title=colnames(cluster.data[a.col])))+
+    labs(x='Cluster',y='Health Rating',
+         title=colnames(cluster.data[a.col]))
+  
+  #display the plot
+  print(p)
+}
+
+#run function for all amenity variables
+for(a.col in 2:13){
+  boxplot.var.funct(a.col)
+}
+
+```
+
+
+
+```{r normality-cluster-check, eval=F}
+
+#========1ST CLUSTER MANOVA ASSUMPTION CHECK: NORMALITY===================
+#=========================================================================
+
+#now that the data is clustered, we will need to check the MANOVA
+#assumptions within each cluster before running a MANOVA on the cluster data
+
+
+#========CREATE NORMALITY CHECK FUNCTION==================================
+#=========================================================================
+
+#create shapiro wilk function that will differentiate between clusters
+cluster.shapiro.funct <- function(data,h.cols,a.cols,transform){
+  #create vectors to hold results
+  h.vars <- a.vars <- p.values0 <- p.values1 <- c()
+  #iterate over all health outcomes
+  for(h.col in h.cols){
+    #log transform outcomes if requested
+    if(transform=='log'){
+    data[,h.col] <- log(data[,h.col])
+    #square root transform outcomes if requested
+    } else if (transform=='sqrt'){
+          data[,h.col] <- sqrt(data[,h.col])
+    #cube root transform outcomes if requested
+    } else if (transform=='cube'){
+          data[,h.col] <- (data[,h.col])^1/3
+      }
+    #iterate over all amenities
+    for(a.col in a.cols){
+      #iterate over each cluster
+      for(c in 1:3){
+        
+        #create a subset of the data for only the specified cluster
+        data2 <- data[data$cluster==c,]
+        
+        #try shapiro wilk test on that health outcome within that cluster
+        #where the amenity is not present
+        test0 <- try(shapiro.test((data2[,h.col][data2[,a.col]==0])),silent=T)
+        #try shapiro wilk test on that health outcome within that cluster
+        #where the amenity is  present
+        test1 <- try(shapiro.test((data2[,h.col][data2[,a.col]==1])),silent=T)
+        
+        #if you get an error because there are not enough
+        #observations in the group without the amenity
+        if(class(test0)=='try-error'){
+           #add NA to the pvalue vector 
+            p.values0 <- append(p.values0,NA)
+            #otherwise, add the resulting pvalue to the pvalue vector
+        } else {p.values0 <- append(p.values0,round(test0$p.value,4))}
+        
+        #if you get an error because there are not enough
+        #observations in the group with the amenity
+        if(class(test1)=='try-error'){
+            #append NA to the pvalue vector
+            p.values1 <- append(p.values1,NA)
+            #otherwise append the resulting pvalue
+        } else {p.values1 <- append(p.values1,round(test1$p.value,4))}
+        
+        #add the health outcome and amenity to their appropriate  vectors
+        h.vars <- append(h.vars,colnames(data2[h.col]))
+        a.vars <- append(a.vars,colnames(data2[a.col]))
+      }
+    }
+  }
+  #combine results into a data frame
+  results <- data.frame(cbind(Cluster=c(rep(c(1:3),length(a.cols))),
+                              Outcome=h.vars,Amenity=a.vars,Pvalue0=p.values0,
+                              Pvalue1=p.values1))
+  
+  #display results with conditional coloring based on p-value < 0.05
+  results %>% 
+    mutate_all(~cell_spec(.x, color = ifelse(is.na(results$Pvalue0)|
+                                               is.na(results$Pvalue1),'white',
+                                             ifelse(results$Pvalue0 < 0.05|
+                                               results$Pvalue1<0.05, "red"," black")),
+        #if the pvalue is NA, color the background grey
+        background = ifelse(is.na(results$Pvalue0)|
+                        is.na(results$Pvalue1), "grey"," white"))) %>%
+    kable(escape = F) %>%
+    kable_styling()
+}
+
+
+#========RUN THE FUNCTIONS WITHIN THE CLUSTERS===================
+#=========================================================================
+
+#run the function on raw cluster data for all amenities and all health outcomes
+cluster.shapiro.funct(cluster.data,h.cols=c(15:28),a.cols=c(2:14),'none')
+
+#run the function on log transformed cluster data
+cluster.shapiro.funct(data=cluster.data,h.cols=c(15,16,18,19,21,22,24,26),a.cols=c(2:14),transform='log')
+
+#run the function on square root transformed data
+cluster.shapiro.funct(cluster.data,h.cols=c(15,16,18,19,21,22,24,26),a.cols=c(2:14),transform='sqrt')
+
+#run the function on cube root transformed data
+cluster.shapiro.funct(cluster.data,h.cols=c(15,16,18,21,22,24,26),a.cols=c(2:14),
+                            transform='cube')
+
+```
+
+
+```{r remove-cluster-vars}
+
+#remove variables that could not be made normal with transformations
+manova.cluster.df <- cluster.data[,-c(15,16,18,21,22,24,26,27)]
+#transform variables that need to be transformed for normality
+manova.cluster.df$Cigarette <- sqrt(manova.cluster.df$Cigarette)
+#change colnames to reflect the transformation
+colnames(manova.cluster.df)[c(16)] <- 'SqrtCigarette'
+
+```
+
+
+```{r independence-test-cluster, eval=F}
+
+#========2ND CLUSTER MANOVA ASSUMPTION CHECK: INDEPENDENCE================
+#=========================================================================
+
+#iterate over each health outcome in the cluster data
+for(h.col in c(15:19)){
+  #display the name of the health outcome
+  cat('Outcome:',colnames(manova.cluster.df[h.col]),'\n')
+  #iterate over each cluster
+  for(c in 1:3){
+    #display the cluster number
+    cat('Cluster:',c,'\n')
+    #save results of independence test of the health outcome
+    #as a function of all amenity variables
+    results <- try(independence_test(
+      manova.cluster.df[manova.cluster.df$cluster==c,][,h.col]~
+              Pets+Camping+Pavillions+Playground+Showers+Waterfalls+
+                      watersports+food.amenities+trails+field.sports+snow.sports+
+                      hunting.fishing+info.center,
+              data=manova.cluster.df[manova.cluster.df$cluster==c,]))
+    
+  #display results
+  print(results)
+  }
+}
+
+```
+
+```{r variance-check-cluster,eval=F}
+
+#========3RD CLUSTER MANOVA ASSUMPTION CHECK: EQUAL VARIANCE==============
+#=========================================================================
+
+#test variance at each combination of amenity and health variable
+#within each cluster to ensure variance is equal
+
+#create vectors to hold pvalues, amenities, and health outcomes
+h.vars <- a.vars <- pvalues <- clusters <- c()
+
+#iterate over all health variables:
+for(h.col in 15:19){
+  #iterate over each amenity variable:
+  for(a.col in 2:14){
+    #iterate over clusters
+    for(c in c(1:3)){
+      #check variance equality via leven test and save the results
+      results <- try(leveneTest(manova.cluster.df[manova.cluster.df$cluster==c,][,h.col]~
+                              manova.cluster.df[manova.cluster.df$cluster==c,][,a.col]))
+      #if the pvalue is <0.05
+      if(results$`Pr(>F)`[1]<0.05){
+        #add the health outcome, amenity variable, pvalue, and cluster number
+        #to its appropriate vector
+        h.vars <- append(h.vars,colnames(manova.cluster.df[h.col]))
+        a.vars <- append(a.vars,colnames(manova.cluster.df[a.col]))
+        pvalues <- append(pvalues,round(results$`Pr(>F)`[[1]],4))
+        clusters <- append(clusters,c)
+      }
+    }
+  }
+}
+
+#save results as dataframe
+res <- as.data.frame(cbind(Cluster=clusters,Outcome=h.vars,Amenity=a.vars,Pvalue=pvalues))
+#sort results by cluster
+res <- arrange(res,Cluster)
+#display results
+res
+
+```
+
+
+```{r equal-sample-test-clusters, eval=F}
+
+#========CREATE FUNCTION TO CHECK IF LARGER SAMPLE HAS LARGER VARIANCE====
+#=========================================================================
+
+#7 combinations of health outcomes and amenities show evidence of unequal variance:
+#cardiovascular and playgrounds
+                    #waterfalls
+                    #field sports
+#sqrtcigarette and waterfalls
+#depression and waterfalls
+
+#therefore we need to make a function to check if the larger
+#sample is >50% larger than the smaller sample for each of
+#the offending combinations of cluster and amenity
+
+#create empty vectors to hold results
+a.vars <- clusters <- larger <- c()
+
+#create function to calculate sample sizes
+#that takes the cluster as the input
+sample.size.funct <- function(c){
+  #iterate over the clusters
+  for(cluster in c){
+    #iterate over the three amenity variables with unequal variance in both clusters
+    for(a.var in c(5,7,11)){
+      #make a table of the size of 0's and 1's for that amenity in that cluster
+      tab <- table(manova.cluster.df[manova.cluster.df$cluster==cluster,a.var])
+      #check if larger sample is >50% greater than smallest sample
+      res <- ((tab[1]/tab[2])>1.5|(tab[2]/tab[1])>1.5)
+      #append the amenity variable, cluster, and results to the vectors
+      a.vars <- append(a.vars,colnames(manova.cluster.df)[a.var])
+      clusters <- append(clusters,cluster)
+      larger <- append(larger,res)
+    }
+  }
+  #save results as dataframe
+  res.df <- cbind(clusters,a.vars,larger)
+  #return results
+  return(res.df)
+}
+
+
+#=========RUN THE FUNCTION================================================
+#=========================================================================
+
+
+#run the function on all combinations with unequal variance
+sample.size.funct(c(1,2))
+
+#the results show only one of the combinations does not
+#have a larger sample >50% greater than the smaller sample
+#so we need to look further into which sample has the larger variance
+
+```
+
+
+```{r sample-size2-cluster, eval=F}
+
+
+#=========CREATE FUNCTION TO CHECK WITH VARIANCE IS LARGER================
+#=========================================================================
+
+
+#create function to find which sample is larger
+#and which sample has the larger variance
+#that takes as inputs the data, the health outcomes, and the amenities
+#where the samples are unequal
+samp.size.funct2.cluster <- function(data,h.cols,a.cols){
+  #create empty vectors to hold the results
+  sample0 <- sample1 <- var0 <- var1 <- var.vec <- c()
+  #iterate over each offending amenity
+  for(index in 1:length(a.cols)){
+    #calculate sample sizes at 0 and 1 for that amenity
+    results <- table(data[,a.cols[index]])
+    #save the sample sizes
+    sample0 <- append(sample0,results[[1]])
+    sample1 <- append(sample1,results[[2]])
+    #calculate variances of both samples
+    var0 <- var(data[data[,a.cols[index]]==0,][,h.cols[index]])
+    var1 <- var(data[data[,a.cols[index]]==1,][,h.cols[index]])
+    #save the name of the sample with the larger variance
+    var.vec <- append(var.vec,ifelse(var0>var1,0,1))
+  }
+
+  #combine results into a data frame
+  var.results <- data.frame(cbind(Outcome=colnames(data)[c(h.cols)],
+                                  Amenity=colnames(data)[c(a.cols)],
+                                  Sample.0=sample0,Sample.1=sample1,
+                                  Larger.Variance=var.vec))
+  #return results
+  return(var.results)
+}
+
+
+#=========RUN THE FUNCTION================================================
+#=========================================================================
+
+
+#run function for cluster 1
+samp.size.funct2.cluster(manova.cluster.df[manova.cluster.df$cluster==1,],c(15,15,15,16),c(5,7,11,7))
+#the results show the only combination where the larger sample
+#also has the larger variance is for sqrtcigarette
+#therefore, only this combination is robust to the equal variance violation
+
+
+#run function for cluster 2
+samp.size.funct2.cluster(manova.cluster.df[manova.cluster.df$cluster==2,],c(15,15,17),c(5,11,7))
+#none of the combinations have larger variance in the larger sample
+#so none of these combinations are robust to the equal variance violation
+
+```
+
+```{r remove-cluster-vars2}
+
+#remove the health outcomes that are not robust
+#to the equal variance assumption violation
+manova.cluster.df <- manova.cluster.df[,-c(15,17)]
+
+```
+
+```{r cluster-collinearity,eval=F}
+
+#check multicollinearity of the remaining health outcomes
+#within each of the clusters
+
+#iterate over the clusters
+for(c in 1:3){
+  #check the correlations between health outcomes
+  print(cor(manova.cluster.df[manova.cluster.df$cluster==c,c(15:17)]))
+}
+
+#no larger correlations indicates no evidence of
+#violation of the no multicollinearity assumption
+
+```
+
+
+```{r cluster-outliers, eval=F}
+
+#next we need to check for outliers within each cluster
+
+
+#=========CHECK FOR OUTLIERS VIA MAHALANOBIS DISTANCE=====================
+#=========================================================================
+
+#iterate over the clusters
+for(c in 1:3){
+  #calculate distances between points in the given cluster
+  mahalanobis.out <- mahalanobis(manova.cluster.df[manova.cluster.df$cluster==c,c(15:17)],
+   colMeans(manova.cluster.df[manova.cluster.df$cluster==c,c(15:17)]),
+   cov(manova.cluster.df[manova.cluster.df$cluster==c,c(15:17)]))
+  #check for outliers based on p-value
+  pvalues <- round(pchisq(mahalanobis.out, df=3, lower.tail=FALSE),4)
+  #check if any pvalues are <0.001
+  print(any(pvalues<0.001))
+}
+
+
+#there are no outliers in any of the clusters
+
+```
+
+
+MANOVA {data-orientation=rows data-navmenu='Question 2'}
+====================
+  
+Row 1 {data-height=75}
+-------------
+
+###
+
+<div align="center"> <h2 align="center"> MANOVA Within Each Cluster </h2> </div>
+
+  
+Row 2 {data-height=80}
+------------
+
+###
+
+<div align="center"> <h5 align="center"> The tables below show the results of a MANOVA conducted within each cluster on the response variables that fit the assumptions within all three clusters: `SqrtCigarette`, `ObeseChild`, and `PCPAdult`. There are no p-values<0.05 in clusters 1 or 2, indicating no evidence of an association between these health outcomes and any of the amenity variables within those clusters. Two park amenities have a p-value<0.05 in cluster 3, waterfalls and food amenities, indicating a possible relationship between these amenities and health outcomes. </h5> </div> 
+
+Row 3
+-----------
+  
+###
+  
+<div align="center"> <h3 align="center"> Cluster 1 </h3> </div>
+
+  
+```{r cluster1-manova}
+
+#run manova function on cluster 1 for all health outcomes
+manova.cluster1 <- summary(manova.funct(
+  manova.cluster.df[manova.cluster.df$cluster==1,],c(15:17)))$stats[1:11,]
+
+#create function to format the results
+format.funct <- function(results){
+  #capitalize column names
+  colnames(results) <- c('DF','Pillai','F-statistic','Num DF','Den DF','P-value')
+  #remove data$ from variables
+  results[,1] <- gsub(".*\\$", "", rownames(results))
+  #remove rownmaes
+  rownames(results) <- NULL
+  #round
+  results[,c(2,3,6)] <- round(as.numeric(results[,c(2,3,6)]),4)
+  #return results
+  return(results)
+}
+
+#run the function to format the results
+manova.cluster1 <- format.funct(manova.cluster1)
+
+#display formattedresults as kable
+manova.cluster1%>%kable%>%
+  #center the columns
+  kable_styling(position = "center")
+
+```
+
+###
+
+<div align="center"> <h3 align="center"> Cluster 2 </h3> </div>
+  
+```{r cluster2-manova}
+
+#because cluster 2 has some rank deficiencies
+#we cannot use the MANOVA function and need to do this one manually
+
+#create vector to hold dependent variables
+dependent.vars <- c()
+#iterate over all columns of the health outcomes
+for(h.col in 15:17){
+  #add each health variable to the dependent.vars vector
+  dependent.vars <- cbind(dependent.vars,
+                          manova.cluster.df[manova.cluster.df$cluster==2,][,h.col])
+}
+
+#create subset of data that is only cluster 2
+data <- manova.cluster.df[manova.cluster.df$cluster==2,]
+
+#fit MANOVA on that subset with all health outcomes without rank deficieny
+fit <- manova(dependent.vars~data$Pets+data$Camping+data$Pavillions+data$Playground+
+                  data$Showers+data$watersports+data$Waterfalls+data$food.amenities+
+                  data$trails+data$snow.sports+data$hunting.fishing+
+                  data$info.center,data=data)
+#save results
+manova.cluster2 <- summary(fit)$stats[1:5,]
+  
+#run the function to format the results
+manova.cluster2 <- format.funct(manova.cluster2)
+
+#display formattedresults as kable
+manova.cluster2%>%kable%>%
+  #center the columns
+  kable_styling(position = "center")
+
+```
+
+
+###
+
+<div align="center"> <h3 align="center"> Cluster 3 </h3> </div>
+  
+```{r cluster3-manova}
+
+#run manova function on cluster 3 for all health variables
+manova.cluster3 <- summary(manova.funct(manova.cluster.df[manova.cluster.df$cluster==3,],
+                                        c(15:17)))$stats[1:11,]
+
+
+#run the function to format the results
+manova.cluster3 <- format.funct(manova.cluster3)
+
+#display formatted results as kable
+manova.cluster3%>%kable%>%
+  #center the columns
+  kable_styling(position = "center")%>%
+#highlight the rows with pvalue<0.05
+  row_spec(c(7,8),background='yellow')
+
+
+```
+
+
+
+MANOVA Coefficients {data-orientation=rows data-navmenu='Question 2'}
+====================
+
+Row 1
+----------
+
+### {data-width=330}
+
+<br />
+<br />
+  
+
+<div align="center"> <h3 align="center"> MANOVA Coefficients </h3> </div>
+
+
+<div align="center"> <h5 align="center"> The table to the right shows the coefficients of the MANOVA for each of the predictor variables that were found to be significant. The coefficients  explain the difference in the expected mean of each health outcome when that variable is present versus when that variable is not present. For example, based on these results, it would be expected that the mean prevalence of child obesity for a county in cluster 1 where waterfalls are present is about 0.839% less than a county in cluster 1 where waterfalls are not present. </h5> </div>
+
+### 
+
+<br />
+<br />
+<br /> 
+  
+```{r manova-coeffs}
+
+
+#=========CALCULATE MANOVA COEFFICIENTS WITHIN EACH CLUSTER===============
+#=========================================================================
+
+
+#first, create empty vectors to hold the results
+cig.coef <- obesity.coef <- pcp.coef <- c()
+
+#iterate over each cluster
+for(c in 1:3){
+  #create a subset of just the specified cluster
+  cluster <- manova.cluster.df[manova.cluster.df$cluster==c,]
+  #create a variable with the health outcomes from that cluster
+  dependent.vars <- cbind(cluster$SqrtCigarette,cluster$ObeseChild,cluster$PCPAdult)
+  #run MANOVA within the cluster with only the significant amenity variables
+  #and save the resulting coefficients
+  cluster.coef <- manova(dependent.vars~Waterfalls+
+                  food.amenities,data=cluster)$coefficients
+  
+  #iterate over each row
+  for(row in 2:3){
+    #append the coefficients to the cig.coef vector
+    cig.coef <- append(cig.coef,round(cluster.coef[row,1],3))
+    #append the coefficients to the obesity.coef vector
+    obesity.coef <- append(obesity.coef,round(cluster.coef[row,2],3))
+    #append the coefficients to the cig.coef vector
+    pcp.coef <- append(pcp.coef,round(cluster.coef[row,3],3))
+  }
+}
+
+#create column identifying the clusters
+cluster.col <- c('Cluster 1','','Cluster 2','','Cluster 3','')
+#create column identifying the amenities
+amenity.col <- rep(c('Waterfalls','Food'),3)
+#combine resulting coefficients and identifying columns into dataframe
+results <- cbind(Cluster=cluster.col,Amenity=amenity.col,
+'Square Root-Transformed Cigarette Usage'=cig.coef,
+'Child Obesity'=obesity.coef,'Adults with Regular Healthcare Provider'=pcp.coef)
+#remove rownames
+rownames(results) <- NULL
+
+
+#=========SHOW RESULTS====================================================
+#=========================================================================
+
+
+#display results as kable
+results%>%kable(align='c')%>%
+  #center the columns
+  kable_styling(position = "center")%>%
+  #bold the first two columns for better readability
+  column_spec(c(1,2),bold=T)
+
+
+```
+
+Row 2
+-----------
+
+### {data-width=330}
+
+<br />
+<br />
+
+<div align="center"> <h3 align="center"> MANOVA Coefficients Back-Transformed </h3> </div>
+
+
+<div align="center"> <h5 align="center"> Because cigarette usage was square root-transformed, a back-transformation must be done in order to interpret the coefficients on the original scale. The table below shows each step done in the back-transformations. The first two columns specify the cluster and amenity variable. The third column displays raw mean cigarette usage in each cluster. The fourth column is the square root of these means. The next column adds the MANOVA coefficients to the square root-transformed means. The new square root-transformed mean is shown and then back-transformed to the original scale by squaring it. The new mean on the original scale is shown, along with the difference in the original raw mean and the new back-transformed mean. </h5> </div> 
+
+###
+
+<br />
+<br />
+<br /> 
+  
+```{r back-transform table}
+
+
+#=========CALCULATE BACKTRANSFORMED MANOVA COEFFICIENTS===================
+#=========================================================================
+
+#calculate raw mean for sqrtcigarette within each 
+#combination of cluster and amenity
+rawmeans <- c(paste(round(mean(
+  cluster1[cluster1$Waterfalls==0,]$SqrtCigarette)^2,2),'%',sep=''),
+  paste(round(mean(cluster1[cluster1$food.amenities==0,]$SqrtCigarette)^2,2),'%',sep=''),
+  paste(round(mean(cluster2[cluster2$Waterfalls==0,]$SqrtCigarette)^2,2),'%',sep=''),
+  paste(round(mean(cluster2[cluster2$food.amenities==0,]$SqrtCigarette)^2,2),'%',sep=''),
+  paste(round(mean(cluster3[cluster3$Waterfalls==0,]$SqrtCigarette)^2,2),'%',sep=''),
+  paste(round(mean(cluster3[cluster3$food.amenities==0,]$SqrtCigarette)^2,2),'%',sep=''))
+
+#calculate the sqrt(raw mean) within each combination
+sqrtmeans <- round(sqrt(as.numeric(str_sub(rawmeans,end = -2))),2)
+#createa  vector of the MANOVA coefficients
+coeffs <- c(0.15,-0.13,1.07,-0.16,-0.05,0.06)
+#create a vector of the sqrt(MANOVA coefficients)
+sqrtmeancoeff <- c(sqrtmeans+coeffs)
+
+#create a vector of the backtransformed MANOVA coefficients
+backtransform <- paste(round(sqrtmeancoeff^2,2),'%',sep='')
+#create a column with the differences between the raw mean and
+#back transformed mean plus the MANOVA coefficient
+diff <- paste(round(as.numeric(str_sub(backtransform,end = -2))-as.numeric(str_sub(rawmeans,end = -2)),2),'%',sep='')
+
+
+#=========CREATE SOME VECTORS TO HELP THE USER UNDERSTAND THE PROCESS=====
+#=========================================================================
+
+
+#create a column identifying the clusters
+clusters <- c('1','','2','','3','')
+#create a column identifying the amenities
+amenities <- c(rep(c('Waterfalls','Food'),3))
+
+#now create vectors of mathematical signs so the table is easy to understand
+plus.vec <- c('$+$','$+$','$+$','$+$','$+$','$+$')
+#vector of equal signs
+equal.vec <- c('=','=','=','=','=','=')
+#vector of squares
+square.vec <- c('² =','² =','² =','² =','² =','² =')
+#and finally, create a black column to ensure appropriate spacing in the table
+blanks <- c(rep('',6))
+
+
+
+#=========SAVE AND DISPLAY RESULTS========================================
+#=========================================================================
+
+
+#save results
+res <- cbind(clusters,amenities,rawmeans,sqrtmeans,plus.vec,coeffs,equal.vec,
+             sqrtmeancoeff,square.vec,backtransform,blanks,diff)
+
+#change colnames
+colnames(res) <- c('Cluster','Amenity','Raw Mean','√Mean',
+                   '','MANOVA Coefficient','','New √Mean','',
+                   'New Raw Mean','','Difference in Means')
+
+#display as kable
+res%>%kable%>%kable_styling(position='center')%>%
+  #bold the columns
+  column_spec(c(1,2,5,7),bold=T)%>%
+  #change background color to make it easier to identify clusters
+  row_spec(c(1,2),background = '#EBFBFD')%>%
+  row_spec(c(3,4),background = '#F0FDEB')%>%
+  row_spec(c(5,6),background = '#FDF9EB')%>%
+  #adjust column widths and add borders
+  column_spec(c(3,11,12),background = 'white')%>%
+  column_spec(c(1,2,5:7),width='0.6cm')%>%
+  column_spec(c(3,4,8),width='2.5cm')%>%
+  column_spec(2,width='3cm')%>%
+  column_spec(c(5,7),width='0.6cm')%>%
+  column_spec(10,width='2.4cm')%>%
+  column_spec(9,width='1cm')%>%
+  row_spec(c(0:6),align='c')%>%
+  column_spec(11,width='1.2cm',border_left=T)%>%
+  column_spec(12,width='5cm')%>%
+  column_spec(c(2,3),border_right=T)
+
+```
+
+
+
+
+Post-Hoc LDA {data-orientation=rows data-navmenu='Question 2'}
+====================
+
+
+<div align="center"> <h5 align="center"> The Linear Discriminant Analysis (LDA) plots below show the separation or lack thereof between observations with the amenity (shown in teal) and those without (shown in red) within each cluster. Interestingly, there appears to be visible separation among some of the predictor variables that were not identified as statistically significant in the MANOVA, such as pets and hunting/fishing in cluster 2. This could be due to the small number of observations, which can lead to over-fitting with LDA. When there are few observations, LDA can nearly always find a line of separation by chance alone. Cluster 2 has the fewest observations of all three clusters, which is likely contributing to this effect. </h5> </div> 
+
+
+```{r lda-cluster-input}
+
+#allow user to select an amenity
+radioButtons(inputId = "amenity3",
+             label = "Please Select an Amenity",
+             choices =  colnames(manova.cluster.df)[c(2:14)],
+             inline = T)
+
+```
+
+###
+
+```{r lda-c1}
+
+#display an LDA plot for cluster 1
+renderPlotly({
+  #create subset of data with user choice
+  sub1 <- cluster1%>%dplyr::select(input$amenity3,SqrtCigarette,ObeseChild,PCPAdult)
+  #run LDA
+  lda.out1 <- lda(sub1[,1]~dependent.vars1,CV=F,tol=0)
+  #save predictions
+  lda.df1 <- cbind(IndependentVariable=sub1[,1],lda = predict(lda.out1)$x)
+  #create predictions plot
+  lda.plot1 <- ggplot(data.frame(lda.df1))+
+    #color the plot based on the amenity chosen
+    geom_point(aes(x = LD1, y = LD2, color = sub1[,1]), size = 4) +
+    theme_classic()+
+    #add labels
+    guides(color=guide_legend(title=colnames(sub1)[1]))+
+    labs(title='Cluster 1')
+  
+  #display the plot
+  ggplotly(lda.plot1)
+})
+
+
+```
+
+###
+
+```{r lda-c2}
+
+#display another LDA plot for cluster 2
+renderPlotly({
+  #create subset of data with user choice
+  sub2 <- cluster2%>%dplyr::select(input$amenity3,SqrtCigarette,ObeseChild,PCPAdult)
+  #run LDA
+  lda.out2 <- lda(sub2[,1]~dependent.vars2,CV=F,tol=0)
+  #save predictions
+  lda.df2 <- cbind(IndependentVariable=sub2[,1],lda = predict(lda.out2)$x)
+  #create predictions plot
+  lda.plot2 <- ggplot(data.frame(lda.df2))+
+    geom_point(aes(x = LD1, y = LD2, color = sub2[,1]), size = 4) +
+    theme_classic()+
+    guides(color=guide_legend(title=colnames(sub2)[1]))+
+    labs(title='Cluster 2')
+  
+  #display the plot
+  ggplotly(lda.plot2)
+})
+
+```
+
+###
+
+```{r lda-c3}
+
+#final LDA plot for cluster 3
+renderPlotly({
+  #create subset of data with user choice
+  sub3 <- cluster3%>%dplyr::select(input$amenity3,SqrtCigarette,ObeseChild,PCPAdult)
+  #run LDA
+  lda.out3 <- lda(sub3[,1]~dependent.vars3,CV=F,tol=0)
+  #save predictions
+  lda.df3 <- cbind(IndependentVariable=sub3[,1],lda = predict(lda.out3)$x)
+  #create predictions plot
+  lda.plot3 <- ggplot(data.frame(lda.df3))+
+    geom_point(aes(x = LD1, y = LD2, color = sub3[,1]), size = 4) +
+    theme_classic()+guides(color=guide_legend(title=colnames(sub3)[1]))+
+    labs(title='Cluster 3')
+  
+  #display the plot
+  ggplotly(lda.plot3)
+})
+
+```
+
+
+Nonparametric ANOVA {data-orientation=rows data-navmenu='Question 2'}
+====================
+  
+Row 1 {data-height=100}
+------------
+  
+<div align="center"> <h3 align="center"> The tables below show the results of a nonparametric (rank-based) ANOVA of overall health rating within each cluster. Yellow rows indicate statistically significant evidence of a difference in mean.  </h3> </div>
+  
+Row 2
+------------
+  
+###
+  
+<div align="center"> <h3 align="center"> Cluster 1 </h3> </div>
+  
+  
+```{r npanova1}
+
+#because overall health rating cannot be made normal within the clusters
+#we need to conduct a nonparametric anova of overall health rating
+#within each cluster
+
+#=============CREATE THE FUNCTION ========================================
+#=========================================================================
+
+#create a function to do this that takes the cluster as input
+np.anova.funct <- function(cluster){
+  
+  #create a subset of the data for the given cluster
+  cluster <- manova.df[manova.cluster.df$cluster==cluster,]
+
+  #run nonparametric anova on subsetted data
+  np.anova <- aov(rank(cluster$HealthRating)~Pets+Camping+Pavillions+
+                           Playground+Showers+Waterfalls+
+                           watersports+food.amenities+trails+field.sports+
+                           snow.sports+hunting.fishing+
+                           info.center,data=cluster)
+  
+  #return results
+  return(np.anova)
+}
+
+#===============RUN FUNCTION ON CLUSTER 1=================================
+#=========================================================================
+
+#run the function on cluster 1
+res1 <- np.anova.funct(1)
+
+#display results as kable
+round(data.frame(unclass(summary(res1)),
+  check.names = FALSE, stringsAsFactors = FALSE)[1:11,],3)%>%
+  kable%>%
+  #center the columns
+  kable_styling(position = "center")%>%
+  #highlight the row with pvalue<0.05
+  row_spec(10, background  = "yellow")
+
+```
+
+
+### {data-height=800}
+
+<div align="center"> <h3 align="center"> Cluster 2 </h3> </div>
+  
+```{r npanova2}
+
+#==============RUN FUNCTION ON CLUSTER 2==================================
+#=========================================================================
+
+#run the function on cluster 2
+res2 <- np.anova.funct(2)
+
+#display results
+round(data.frame(unclass(summary(res2)),
+  check.names = FALSE, stringsAsFactors = FALSE)[1:6,],3)%>%
+  kable%>%kable_styling(position = "center")
+
+```
+
+###
+
+<div align="center"> <h3 align="center"> Cluster 3 </h3> </div>
+  
+```{r npanova3}
+
+#==============RUN FUNCTION ON CLUSTER 3==================================
+#=========================================================================
+
+#run the function on cluster 3
+res3 <- np.anova.funct(3)
+
+#display results
+round(data.frame(unclass(summary(res3)),
+  check.names = FALSE, stringsAsFactors = FALSE)[1:11,],3)%>%
+  kable%>%kable_styling(position = "center")
+
+```
+
+Row 3 {data-height=100}
+--------------
+  
+<div align="center"> <h3 align="center"> The tables below show the results of a Tukey-Kramer contrast of the ANOVA results above. There are no p-values<0.05 when the family-wise error rate is controlled. The estimated difference for cluster 3 is 0, and the p-value is 1. This is likely due to the nearly equivalent mean health rating at each level of snow sports for cluster 3, shown below. </h3> </div>
+  
+Row 4
+------------
+  
+###
+  
+```{r cluster1-tukey}
+
+#now we need a tukey-kramer to adjust for the
+#family wise error
+
+#create tukey-kramer function that takes the cluster as input
+tukey.funct <- function(cluster){
+  
+  #create anova with only the significant amentity variable
+  posthoc <- aov(rank(HealthRating)~snow.sports,
+                 data=manova.cluster.df[manova.cluster.df$cluster==cluster,])
+  #run tukey-kramer contrast
+  results <- TukeyHSD(posthoc)
+  #extract the estimated difference, low CI, high CI, and pvalue from the results
+  diff <- round(results[[1]][1],3)
+  lo <- round(results[[1]][2],3)
+  hi <- round(results[[1]][3],3)
+  p <- round(results[[1]][4],2)
+  
+  #create dataframe of results
+  res <- as.data.frame(cbind(Amenity='Snow Sports',Difference=diff,
+                      LowCI=lo,HighCI=hi,Pvalue=p))
+  #display results
+  res%>%kable%>%kable_styling(position = "center")%>%
+    #color the pvalue red
+    column_spec(5,bold=T,color='red')
+}
+
+#run function on cluster 1
+tukey.funct(1)
+
+```
+
+
+###
+
+```{r cluster2-tukey}
+
+#run function on cluster 2
+tukey.funct(2)
+
+```
+
+###
+
+```{r cluster3-tukey}
+
+#run function on cluster 3
+tukey.funct(3)
+
+#this results in a pvalue of 1, likely because the raw mean
+#overall health rating when snow sports are available and are not
+#in cluster 3 is nearly identical, so we need to explain this with some text
+cat('Mean overall health rating in cluster 3 when snow sports are not available: ',
+    round(mean(cluster3[cluster3$snow.sports==0,]$HealthRating),3),
+'\nMean overall health rating in cluster 3 when snow sports are available: ',
+    round(mean(cluster3[cluster3$snow.sports==1,]$HealthRating),3))
+
+```
+
+
+
+Question 2 Conclusion {data-orientation=rows data-navmenu='Question 2'}
+============
+  
+
+
+<br />
+<br />
+
+<div align="center"> <h1 align="center"> **Question 2 Conclusion:** </h1> </div>
+  
+<br />
+
+<div align="center"> <h3 align="center"> **Question 2:	Does the relationship vary between groups of counties with different ranges of health outcomes and, if so, what is the magnitude and direction of the relationship(s) within each group?** </h3> </div>
+
+  
+<div align="center"> <h4 align="center"> The only individual health outcomes that met the assumptions of MANOVA and could be assessed were square-root transformed cigarette usage, childhood obesity, and adults with a regular healthcare provider. The only park amenities that had a statistically significant relationship with these health outcomes were waterfalls and food amenities in cluster 3 (p-value=0.0002 and p-value=0.04, respectively).  \
+<br />
+When waterfalls are present in state parks within counties in clusters 1 and 2, a decrease can be seen in the percentage of adults who smoke cigarettes. However, the presence of food amenities within these counties is associated with an increase in this statistic. Child obesity decreases in all clusters when waterfalls are present and in clusters 1 and 2 when food amenities are present. The percentage of adults with a regular healthcare provider increases for counties in clusters 1 and 2 when waterfalls are present but decreases in cluster 3 when either waterfalls or food amenities are present.   \
+<br />
+No statistically significant evidence of an association between overall health rating and any of the park amenities was found when the family-wise error rate was controlled for.
+
+</h4> </div>
+  
+  
+Overall Conclusions {data-orientation=columns}
+===============
+  
+Col 1 
+------------
+  
+###
+  
+  
+![Niagara Falls state Park](C:/Users/annek/Downloads/Capstone/pic.jpeg)
+
+
+Col 2 
+----------
+  
+
+###
+  
+<br />
+<br />
+<br />
+<br />
+<br />
+<br />
+<br />
+
+* **Study Results**:
+  + When all counties are considered:
+    + Possible positive association between all health outcomes and playgrounds
+    + Possible positive association between overall health rating and trails
+    
+  + When counties are clustered:
+    + MANOVA Results:
+      + Waterfalls:
+        + Cigarette usage decreases in clusters 1 and 2.
+        + Child obesity decreases in all clusters.
+        + Adults with a regular healthcare provider increases in clusters 1 and 2.
+      + Food Amenities:
+        + Cigarette usage decreases in cluster 3 but increases in clusters 1 and 2.
+        + Child obesity decreases in clusters 1 and 2 but increases slightly in cluster 3. 
+        + Adults with a regular healthcare provider decreases in clusters 1 and 3 but increases in cluster 2.
+    + Nonparametric ANOVA Results:
+      + No evidence of association
+
+* **Implications**:
+  + Research possible associations between:
+    + Trails and overall health rating.
+    + Waterfalls and cigarette usage.
+    + Waterfalls and child obesity
+    + Food amenities and child obesity.
+  + Consider confounding factors.
+  + Retest with a larger sample size.
+
